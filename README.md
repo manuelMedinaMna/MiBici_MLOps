@@ -12,6 +12,38 @@ Los datos crudos son los [datos abiertos de MiBici](https://mibici.net/es/datos-
 
 Detalles de las fuentes, cómo obtener los datos y problemas conocidos en [references/fuentes_datos.md](references/fuentes_datos.md).
 
+## Cómo empezar
+
+Requiere Python 3.13 y acceso a la carpeta de Google Drive del equipo (pídela a un integrante).
+
+```powershell
+git clone https://github.com/robertonali/MiBici_MLOps.git
+cd MiBici_MLOps
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
+pip install -U pyopenssl
+dvc remote modify --local drive gdrive_client_secret <secreto>
+dvc pull
+```
+
+- **`pip install -U pyopenssl`**: pip instala un `pyOpenSSL` viejo que hace fallar a DVC con
+  `module 'lib' has no attribute 'GEN_EMAIL'`. La advertencia de `pydrive2` sobre la versión se
+  puede ignorar.
+- **`<secreto>`**: el secreto del cliente OAuth de Google. Se comparte por un canal privado y se
+  guarda en `.dvc/config.local`, que no se sube a Git. **Nunca lo pongas en `.dvc/config`.**
+- **`dvc pull`**: la primera vez abre el navegador para autorizar tu cuenta de Google.
+
+### Versionar cambios en los datos
+
+```powershell
+dvc add data/raw
+git add data/raw.dvc
+git commit -m "Actualizar datos"
+dvc push        # si falla con WinError 10054: dvc push -j 2
+git push
+```
+
 ## Project Organization
 
 ```
