@@ -13,6 +13,17 @@ referencia versionada de cómo se obtuvieron.
 - **Nota:** el servidor bloquea peticiones sin un `User-Agent` de navegador (responde
   `406 Not Acceptable`), así que las descargas con `curl`/`requests` necesitan ese encabezado.
 
+## Cómo obtener los datos
+
+1. **Con DVC (recomendado):** los datos se versionan con DVC en un Google Drive de la cuenta
+   escolar del equipo. Con acceso a esa carpeta, basta con `dvc pull`.
+2. **Sin acceso al Google Drive:** descargar los CSV de la página oficial
+   (<https://mibici.net/es/datos-abiertos/>) y acomodarlos según la estructura de abajo.
+   Abril y mayo de 2023 ya no están en el sitio; usar las URLs de
+   [Archivos recuperados de Internet Archive](#archivos-recuperados-de-internet-archive).
+   Los archivos así descargados pueden no coincidir byte a byte con la versión registrada en DVC
+   si el sitio los actualiza.
+
 ## Estructura en `data/raw/`
 
 ```
