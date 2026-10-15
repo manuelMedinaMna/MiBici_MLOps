@@ -6,6 +6,8 @@
 
 Realizar tareas de manipulación, preparación, exploración y preprocesamiento de datos, gestionando grandes volúmenes de datos distribuidos y aplicando técnicas de versionado de datos para asegurar la reproducibilidad y trazabilidad en proyectos de Machine Learning.
 
+Detalles de las fuentes y problemas conocidos de los datos en [references/fuentes_datos.md](references/fuentes_datos.md).
+
 ## Project Organization
 
 ```
