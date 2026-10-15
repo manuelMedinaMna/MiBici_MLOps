@@ -47,7 +47,7 @@ git push
 ## Project Organization
 
 ```
-├── LICENSE            <- Open-source license if one is chosen
+├── LICENSE            <- MIT (aplica al código; los datos son de MiBici)
 ├── Makefile           <- Makefile with convenience commands like `make data` or `make train`
 ├── README.md          <- The top-level README for developers using this project.
 ├── data
@@ -72,10 +72,8 @@ git push
 ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
 │   └── figures        <- Generated graphics and figures to be used in reporting
 │
-├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-│                         generated with `pip freeze > requirements.txt`
-│
-├── setup.cfg          <- Configuration file for flake8
+├── requirements.txt   <- Dependencias directas del proyecto (agregar a mano; no usar
+│                         `pip freeze`, ver sección "Cómo empezar")
 │
 └── mibici_mlops   <- Source code for use in this project.
     │
