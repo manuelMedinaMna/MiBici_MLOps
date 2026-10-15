@@ -17,6 +17,11 @@ referencia versionada de cómo se obtuvieron.
 
 1. **Con DVC (recomendado):** los datos se versionan con DVC en un Google Drive de la cuenta
    escolar del equipo. Con acceso a esa carpeta, basta con `dvc pull`.
+   - Antes, guardar el secreto del cliente OAuth (se comparte por un canal privado, nunca en
+     el repo): `dvc remote modify --local drive gdrive_client_secret <secreto>`
+   - Si DVC falla con `module 'lib' has no attribute 'GEN_EMAIL'`, correr
+     `pip install -U pyopenssl` (pip instala un `pyOpenSSL` viejo, incompatible con
+     `cryptography` reciente; la advertencia de `pydrive2` sobre la versión se puede ignorar).
 2. **Sin acceso al Google Drive:** descargar los CSV de la página oficial
    (<https://mibici.net/es/datos-abiertos/>) y acomodarlos según la estructura de abajo.
    Abril y mayo de 2023 ya no están en el sitio; usar las URLs de

@@ -1,5 +1,7 @@
-# Data
-/data/
+# Data (data/raw lo versiona DVC; ver data/.gitignore)
+/data/interim/
+/data/processed/
+/data/external/
 
 # Mac OS-specific storage files
 .DS_Store
