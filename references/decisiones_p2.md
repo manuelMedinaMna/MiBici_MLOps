@@ -132,7 +132,7 @@ como candidatos regresión logística y gradient boosting con pesos de clase.
 | Rol | Modelo | Qué predice |
 |---|---|---|
 | Baseline 1 | Clase mayoritaria (`DummyClassifier(strategy="most_frequent")`) | Siempre "sin riesgo" |
-| Baseline 2 | Persistencia semanal | La misma clase que tuvo la estación en la misma ventana y el mismo día de la semana anterior |
+| Baseline 2 | Frecuencia en las últimas 4 semanas | Para cada clase de riesgo, la fracción de las últimas 4 semanas (misma estación, mismo día de la semana y misma ventana) en que hubo ese riesgo: 0, 0.25, 0.5, 0.75 o 1 |
 | Candidato 1 | `LogisticRegression(class_weight="balanced")` | Probabilidad de cada clase a partir de las variables |
 | Candidato 2 | `HistGradientBoostingClassifier(class_weight="balanced")` | Probabilidad de cada clase a partir de las variables |
 
@@ -144,11 +144,16 @@ clase de riesgo ("se vacía" y "se llena"), no exactitud (ver decisión 1).
 - **Clase mayoritaria:** es el piso mínimo. Como las clases de riesgo son ~1% de las ventanas,
   tiene exactitud alta pero recall de 0 en las clases de riesgo: muestra por qué la exactitud no
   sirve como métrica.
-- **Persistencia semanal:** es una regla simple que sí detecta riesgo, así que es la referencia
-  real que un modelo debe superar. Se usa la semana anterior y no el día anterior porque los
-  días hábiles y los fines de semana tienen patrones distintos, y porque es el mismo tipo de
-  baseline que el ML Canvas propone para P1. Solo usa información disponible al momento de
+- **Frecuencia en las últimas 4 semanas:** es una regla simple que sí detecta riesgo, así que es
+  la referencia real que un modelo debe superar. Solo usa información disponible al momento de
   predecir (la noche anterior).
+  - **Mismo día de la semana, no el día anterior:** los días hábiles y los fines de semana tienen
+    patrones distintos; un lunes se parece más al lunes pasado que al domingo.
+  - **4 semanas, no solo la anterior:** una semana atípica (feriado, lluvia) pesa solo 1/4.
+    Además da un puntaje (0 a 1) y no solo "sí/no", así que se puede calcular la PR-AUC igual
+    que con los modelos; con una sola semana la PR-AUC casi no tendría sentido.
+  - **4 y no todo el historial:** reacciona a cambios recientes, como las estaciones nuevas de
+    2026. Cuatro semanas son aproximadamente un mes; al ser un baseline no se optimiza.
 - **`LogisticRegression`:** simple, rápida e interpretable (los coeficientes indican qué variable
   pesa más). Sirve para saber si una relación aproximadamente lineal entre las variables y el
   riesgo es suficiente.
@@ -170,5 +175,70 @@ clase de riesgo ("se vacía" y "se llena"), no exactitud (ver decisión 1).
 
 - Para entrenar los modelos hace falta primero la etiqueta (inventario inicial y umbral) y las
   variables de `features.py`.
-- La persistencia semanal no puede predecir la primera semana de datos; esas ventanas se excluyen
-  de la evaluación o caen antes del periodo de prueba.
+- El baseline de frecuencia no puede predecir las primeras 4 semanas de datos; esas ventanas
+  quedan antes del periodo de prueba.
+- Las mismas variables (riesgo hace 1 día, hace 1 semana, frecuencia en las últimas 4 semanas)
+  pueden servir como variables de entrada de los modelos candidatos en `features.py`.
+
+## 4. Inventario inicial: reinicio diario al 50% de la capacidad
+
+- **Fecha:** 2026-10-17
+- **Estado:** vigente
+- **Aplica a:** el cálculo de la etiqueta de P2.
+
+### Contexto
+
+MiBici no publica cuántas bicicletas hay en cada estación, así que el inventario se simula: se
+supone un inventario inicial y se le suman las llegadas y se le restan las salidas. Tampoco se
+sabe cuándo pasa el camión de rebalanceo, así que la simulación tiene que reiniciarse cada cierto
+tiempo; si se acumulara sin reinicio, el inventario estimado crecería o bajaría sin límite.
+
+### Decisión
+
+Cada día **a las 4:00**, cada estación **empieza con el 50% de su capacidad** (`dpcapacity`).
+El "día" de la simulación va de las 4:00 a las 3:59 del día siguiente. Durante el resto del día el inventario estimado se **acumula**: al inventario
+inicial se le suman las llegadas y se le restan las salidas, y no se reinicia en cada ventana de
+2 horas.
+
+**Ejemplo:** estación con capacidad 20, empieza con 10 bicicletas.
+
+| Ventana | Llegadas − salidas | Inventario estimado al final |
+|---|---|---|
+| 6–8 h | −6 | 10 − 6 = 4 |
+| 8–10 h | −6 | 4 − 6 = −2 → se vacía |
+
+### Por qué
+
+- **Reinicio diario:** supone que en la noche, cuando casi no hay viajes, el sistema se rebalancea,
+  que es la práctica usual. Es la forma más simple de evitar que el inventario estimado se
+  descontrole sin conocer los recorridos reales de rebalanceo.
+- **A las 4:00:** entre la 1:00 y las 5:00 casi no hay viajes (0 por día de 2:00 a 4:59), así
+  que el sistema prácticamente no opera en ese horario. A las 00:00 hay ~23 viajes por día a medio
+  camino que el reinicio cortaría; a las 4:00, prácticamente ninguno (0.4 por día). Es la última
+  hora sin actividad antes de que arranque el servicio y coincide con el inicio de un bloque de
+  2 horas (04:00–06:00). Cualquier hora entre 2:00 y 4:00 daría el mismo resultado. Las cifras
+  están en la sección 11 de `notebooks/2.0-rc-p2-tamano-ventana.ipynb`.
+- **50% de la capacidad:** no favorece ni el vaciado ni el llenado; las dos clases de riesgo
+  parten de la misma distancia.
+- **Acumular dentro del día:** el riesgo de una ventana depende de lo que pasó antes ese mismo
+  día. En el ejemplo, la estación se vacía a las 8–10 h porque ya venía perdiendo bicicletas desde
+  las 6; si cada ventana empezara de nuevo al 50%, ese riesgo no se detectaría.
+
+### Alternativas descartadas
+
+- **Reiniciar al 50% en cada ventana de 2 horas:** cada ventana "olvida" lo que pasó antes. Es lo
+  que se usó como umbral provisional en `notebooks/2.0-rc-p2-tamano-ventana.ipynb`, suficiente
+  para comparar tamaños de ventana con la misma regla, pero no para la etiqueta final.
+- **Sin reinicio:** sin observar el rebalanceo, el inventario estimado llega a cientos de
+  bicicletas negativas o positivas.
+- **Inventario inicial distinto por estación, estimado de los datos:** más realista (una estación
+  que se vacía cada mañana probablemente empieza llena), pero más compleja y difícil de validar
+  sin el inventario real. Queda como posible mejora.
+
+### Consecuencias
+
+- Los porcentajes de riesgo de la decisión 2 se calcularon reiniciando cada ventana; con esta
+  regla cambiarán. La elección de la ventana de 2 horas no depende de eso, porque todos los
+  tamaños se compararon con la misma regla.
+- **Pendiente:** con qué umbral el inventario estimado cuenta como "se vacía" o "se llena" (por
+  ejemplo, llegar a 0 o a la capacidad, o quedar a menos de cierto margen).
