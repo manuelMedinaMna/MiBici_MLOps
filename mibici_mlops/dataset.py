@@ -44,6 +44,10 @@ ESQUEMA = pa.schema(
         ("fin", pa.timestamp("s")),
         ("origen_id", pa.int32()),
         ("destino_id", pa.int32()),
+        ("origen_lon", pa.float64()),
+        ("origen_lat", pa.float64()),
+        ("destino_lon", pa.float64()),
+        ("destino_lat", pa.float64()),
     ]
 )
 
@@ -92,6 +96,10 @@ def a_entero(columna: pd.Series, tipo: str) -> pd.Series:
     """Convierte a entero nullable; acepta flotantes como '1984.0'."""
     return pd.to_numeric(columna, errors="coerce").round().astype(tipo)
 
+def a_float(columna: pd.Series) -> pd.Series:
+    """Convierte a float nullable; acepta enteros como '1984'."""
+    return pd.to_numeric(columna, errors="coerce").astype(float)
+
 
 def limpiar(df: pd.DataFrame) -> pd.DataFrame:
     """Aplica tipos a un mes de viajes. Los valores inválidos quedan como nulos."""
@@ -125,12 +133,24 @@ def quitar_duplicados(df: pd.DataFrame, nombre: str) -> pd.DataFrame:
         logger.warning(f"{nombre}: {eliminadas:,} filas duplicadas eliminadas")
     return sin_duplicados
 
+def unir_estaciones(df: pd.DataFrame, estdf: pd.DataFrame) -> pd.DataFrame:
+    """Une las estaciones a los viajes."""
+    con_est = df.copy()
+    con_est["origen_lon"] = a_float(con_est.origen_id.map(estdf.longitude))
+    con_est["origen_lat"] = a_float(con_est.origen_id.map(estdf.latitude))
+    con_est["destino_lon"] = a_float(con_est.destino_id.map(estdf.longitude))
+    con_est["destino_lat"] = a_float(con_est.destino_id.map(estdf.latitude))
+    return con_est
 
 @app.command()
 def main(
+    estaciones_path: Path = RAW_DATA_DIR / "estaciones/nomenclatura_2026_09.csv",
     viajes_dir: Path = RAW_DATA_DIR / "viajes",
     output_path: Path = INTERIM_DATA_DIR / "viajes.parquet",
 ):
+    estaciones = pd.read_csv(estaciones_path)
+    estaciones.set_index("id", inplace=True)
+
     archivos = listar_archivos(viajes_dir)
     logger.info(f"Uniendo {len(archivos)} archivos de {viajes_dir}")
 
@@ -141,6 +161,7 @@ def main(
         for ruta in tqdm(archivos, desc="Meses"):
             crudo = leer_csv(ruta)
             limpio = limpiar(crudo)
+            limpio = unir_estaciones(limpio, estaciones)
             reportar_nulos_nuevos(crudo, limpio, ruta.name)
             limpio = quitar_duplicados(limpio, ruta.name)
             writer.write_table(pa.Table.from_pandas(limpio, schema=ESQUEMA, preserve_index=False))
