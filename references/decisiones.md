@@ -62,3 +62,48 @@ carga ~5 veces más lento y pierde los tipos de dato.
 - `pandas` y `pyarrow` son dependencias del proyecto (están en `requirements.txt`).
 - Las reglas de limpieza no dependen del formato: están en `mibici_mlops/dataset.py`. Para
   cambiarlas se edita ese archivo y se vuelve a correr `python -m mibici_mlops.dataset`.
+
+## 2. Usar los viajes desde marzo de 2022
+
+- **Fecha:** 2026-10-16
+- **Estado:** vigente
+- **Aplica a:** el paso `interim → processed` (`features.py`) y todos los modelos (P1, P2 y P3).
+  `data/interim/` conserva la historia completa (2014-12 a 2026-09).
+
+### Contexto
+
+Los datos cubren de diciembre de 2014 a septiembre de 2026. La pandemia cambió por completo el
+uso de MiBici, así que había que decidir desde qué mes los datos representan la operación
+normal. El análisis está en `notebooks/1.0-rc-periodo-de-datos.ipynb`, que compara cada mes
+contra el mismo mes de 2019 (el último año normal) para no confundir la estacionalidad con una
+caída real.
+
+### Decisión
+
+Usar los viajes **desde el 1 de marzo de 2022** hasta el último mes disponible.
+
+### Por qué
+
+- **2015–2018:** el sistema todavía estaba creciendo (de ~30 mil a ~400 mil viajes al mes).
+- **2019:** uso estable, ~386 mil viajes al mes en promedio.
+- **2020–2021:** en abril de 2020 hubo 129,276 viajes, el 36% de abril de 2019 (361,504).
+  Ningún mes de 2020 ni de 2021 alcanza el nivel de 2019.
+- **Enero y febrero de 2022:** todavía bajos, 72% y 81% del mismo mes de 2019.
+- **Desde marzo de 2022:** casi todos los meses quedan entre 86% y 112% del mismo mes de
+  2019: el uso regresó al nivel previo a la pandemia y se mantiene.
+
+### Alternativas descartadas
+
+- **Desde enero de 2022:** daría años completos, pero incluye dos meses todavía afectados por
+  la pandemia. Enero y febrero siguen apareciendo completos en 2023, 2024, 2025 y 2026.
+- **Incluir 2019 o antes:** el nivel de uso es parecido, pero entre 2019 y 2022 hay dos años
+  anormales; el modelo aprendería de una serie con un hueco de dos años.
+
+### Consecuencias
+
+- El periodo queda de 2022-03 a 2026-09: 55 meses.
+- 2023, 2024 y 2025 están completos; 2022 empieza en marzo y 2026 llega hasta septiembre.
+- La fecha de inicio debe definirse una sola vez en `mibici_mlops/config.py` y usarse desde ahí.
+- **Pendiente:** septiembre de 2026 tiene 127% de los viajes de septiembre de 2019, el máximo
+  de la serie. Los datos parecen correctos (mismos usuarios haciendo más viajes y más cortos
+  desde mediados de mes), pero falta decidir cómo tratarlo en la partición de prueba.

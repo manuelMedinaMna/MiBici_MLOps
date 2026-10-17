@@ -1,8 +1,8 @@
 """Une y limpia los CSV mensuales de viajes de MiBici en un solo Parquet.
 
-Paso raw → interim: corrige las diferencias de formato entre archivos (ver
-references/fuentes_datos.md) sin filtrar ni descartar filas. Las decisiones de análisis,
-como el periodo a usar, van en pasos posteriores.
+Paso raw → interim: corrige las diferencias de formato entre archivos y los errores de los
+datos, como filas duplicadas (ver references/fuentes_datos.md). No filtra filas por criterios de
+análisis: esas decisiones, como el periodo a usar, van en features.py.
 
 Uso:
     python -m mibici_mlops.dataset
@@ -117,6 +117,15 @@ def reportar_nulos_nuevos(crudo: pd.DataFrame, limpio: pd.DataFrame, nombre: str
         logger.warning(f"{nombre}: valores no convertibles -> nulo: {perdidos.to_dict()}")
 
 
+def quitar_duplicados(df: pd.DataFrame, nombre: str) -> pd.DataFrame:
+    """Elimina filas idénticas en todas las columnas (el mismo viaje escrito dos veces)."""
+    sin_duplicados = df.drop_duplicates()
+    eliminadas = len(df) - len(sin_duplicados)
+    if eliminadas:
+        logger.warning(f"{nombre}: {eliminadas:,} filas duplicadas eliminadas")
+    return sin_duplicados
+
+
 @app.command()
 def main(
     viajes_dir: Path = RAW_DATA_DIR / "viajes",
@@ -133,6 +142,7 @@ def main(
             crudo = leer_csv(ruta)
             limpio = limpiar(crudo)
             reportar_nulos_nuevos(crudo, limpio, ruta.name)
+            limpio = quitar_duplicados(limpio, ruta.name)
             writer.write_table(pa.Table.from_pandas(limpio, schema=ESQUEMA, preserve_index=False))
             total += len(limpio)
 

@@ -105,3 +105,13 @@ El formato cambia a lo largo del tiempo y no siempre de forma consistente dentro
   (`na_values=["NULL"]`).
 - **Viajes que cruzan de mes:** un viaje iniciado el último día del mes puede terminar el mes
   siguiente; se asigna al archivo del mes en que inicia.
+
+## Filas duplicadas
+
+`2026/datos_abiertos_2026_09.csv` tiene **758 viajes escritos dos veces**: la copia es idéntica
+al original en todas las columnas y siempre está en la fila siguiente (p. ej. `viaje_id`
+`45705948` en las filas 134 y 135 del CSV). Ningún otro archivo tiene duplicados, ni dentro del
+mes ni entre meses distintos (revisado en `notebooks/1.0-rc-periodo-de-datos.ipynb`).
+
+`mibici_mlops/dataset.py` elimina las filas idénticas de cada archivo al generar
+`data/interim/viajes.parquet` y avisa cuántas quitó.

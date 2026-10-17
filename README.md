@@ -27,6 +27,7 @@ python -m pip install -r requirements.txt
 pip install -U pyopenssl
 dvc remote modify --local drive gdrive_client_secret <secreto>
 dvc pull
+python -m mibici_mlops.dataset
 ```
 
 - **`pip install -U pyopenssl`**: pip instala un `pyOpenSSL` viejo que hace fallar a DVC con
@@ -35,6 +36,9 @@ dvc pull
 - **`<secreto>`**: el secreto del cliente OAuth de Google. Se comparte por un canal privado y se
   guarda en `.dvc/config.local`, que no se sube a Git. **Nunca lo pongas en `.dvc/config`.**
 - **`dvc pull`**: la primera vez abre el navegador para autorizar tu cuenta de Google.
+- **`python -m mibici_mlops.dataset`**: une y limpia los 142 CSV de `data/raw/viajes/` en
+  `data/interim/viajes.parquet` (~39 millones de viajes; tarda entre 5 y 10 minutos). Qué
+  corrige y por qué está en [references/fuentes_datos.md](references/fuentes_datos.md).
 
 ### Versionar cambios en los datos
 

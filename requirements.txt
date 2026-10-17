@@ -1,5 +1,7 @@
 dvc[gdrive]
+ipykernel
 loguru
+matplotlib
 mkdocs
 pandas
 pip
