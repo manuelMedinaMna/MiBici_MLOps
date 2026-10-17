@@ -16,7 +16,9 @@ Las decisiones técnicas y de análisis del proyecto (por ejemplo, por qué los 
 
 ## Cómo empezar
 
-Requiere Python 3.13 y acceso a la carpeta de Google Drive del equipo (pídela a un integrante).
+Requiere Python 3.13 y acceso a la carpeta de Google Drive del equipo. Pídele a un integrante
+que comparta la carpeta con tu cuenta de Google y que te agregue como *test user* de la app
+OAuth en Google Cloud; sin esto, `dvc pull` muestra "access blocked".
 
 ```powershell
 git clone https://github.com/robertonali/MiBici_MLOps.git
@@ -39,6 +41,19 @@ python -m mibici_mlops.dataset
 - **`python -m mibici_mlops.dataset`**: une y limpia los 142 CSV de `data/raw/viajes/` en
   `data/interim/viajes.parquet` (~39 millones de viajes; tarda entre 5 y 10 minutos). Qué
   corrige y por qué está en [references/fuentes_datos.md](references/fuentes_datos.md).
+
+### Verificar que todo quedó bien
+
+| Después de | Revisa | Resultado esperado |
+|---|---|---|
+| `dvc pull` | `dvc status` | `Data and pipelines are up to date.` |
+| `python -m mibici_mlops.dataset` | Las últimas líneas del log | `datos_abiertos_2026_09.csv: 758 filas duplicadas eliminadas` y `39,078,082 viajes guardados` |
+| Todo lo anterior | Correr `notebooks/1.0-rc-periodo-de-datos.ipynb` con el intérprete de `.venv` | La sección 6 muestra 0 filas con `viaje_id` repetido |
+
+Si un resultado no coincide, avisa al equipo con el mensaje de error antes de seguir.
+
+Al clonar, `data/` solo trae `.gitignore` y `raw.dvc`: `dvc pull` crea `data/raw/` y
+`dataset.py` crea `data/interim/`. `data/processed/` aún no lo genera ningún script.
 
 ### Versionar cambios en los datos
 
