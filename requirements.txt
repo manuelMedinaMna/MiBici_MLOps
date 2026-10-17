@@ -1,7 +1,9 @@
 dvc[gdrive]
 loguru
 mkdocs
+pandas
 pip
+pyarrow
 python-dotenv
 ruff
 tqdm

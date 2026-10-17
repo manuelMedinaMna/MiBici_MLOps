@@ -12,6 +12,8 @@ Los datos crudos son los [datos abiertos de MiBici](https://mibici.net/es/datos-
 
 Detalles de las fuentes, cómo obtener los datos y problemas conocidos en [references/fuentes_datos.md](references/fuentes_datos.md).
 
+Las decisiones técnicas y de análisis del proyecto (por ejemplo, por qué los datos procesados se guardan en Parquet) están en [references/decisiones.md](references/decisiones.md).
+
 ## Cómo empezar
 
 Requiere Python 3.13 y acceso a la carpeta de Google Drive del equipo (pídela a un integrante).

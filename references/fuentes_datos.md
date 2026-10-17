@@ -96,7 +96,10 @@ El formato cambia a lo largo del tiempo y no siempre de forma consistente dentro
 - **Encabezado de la columna 4 dañado:** según el archivo aparece como `Año_de_nacimiento`,
   `A�o_de_nacimiento` o `A}�e_nacimiento` (este último en `2023_04`, `2023_05`, `2024_02` y
   `2024_05`). **Renombrar las columnas por posición**, no por nombre.
-- **Año de nacimiento:** en los primeros años viene como flotante (`1984.0`).
+- **Formato de fecha:** casi todos usan `YYYY-MM-DD HH:MM:SS`, pero `2023_11`, `2024_09` y
+  `2024_10` usan `DD/MM/YYYY H:MM` (día primero y **sin segundos**).
+- **Año de nacimiento:** en los primeros años viene como flotante (`1984.0`). Desde 2021
+  algunos faltantes aparecen como el texto `NA`.
 - **Género faltante:** en los primeros años aparece como campo vacío; desde 2022 aparece como
   `NULL` sin comillas (aunque el resto de la fila sí las tenga). Tratar ambos como nulo
   (`na_values=["NULL"]`).
