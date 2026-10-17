@@ -113,3 +113,62 @@ coincide con el ML Canvas.
   cada estación y qué umbral cuenta como riesgo.
 - **Pendiente de revisión:** 3.6% de los viajes dura menos de 1 minuto y 45 duran más de
   24 horas.
+
+## 3. Baselines y modelos candidatos
+
+- **Fecha:** 2026-10-17
+- **Estado:** vigente
+- **Aplica a:** el entrenamiento y la evaluación de P2.
+
+### Contexto
+
+La actividad pide, para cada pregunta, un baseline sencillo y al menos un modelo candidato. En
+esta entrega solo los baselines se implementan y se registran en MLflow; los candidatos se
+proponen y justifican. El ML Canvas (iteración 1) proponía como baseline la clase mayoritaria y
+como candidatos regresión logística y gradient boosting con pesos de clase.
+
+### Decisión
+
+| Rol | Modelo | Qué predice |
+|---|---|---|
+| Baseline 1 | Clase mayoritaria (`DummyClassifier(strategy="most_frequent")`) | Siempre "sin riesgo" |
+| Baseline 2 | Persistencia semanal | La misma clase que tuvo la estación en la misma ventana y el mismo día de la semana anterior |
+| Candidato 1 | `LogisticRegression(class_weight="balanced")` | Probabilidad de cada clase a partir de las variables |
+| Candidato 2 | `HistGradientBoostingClassifier(class_weight="balanced")` | Probabilidad de cada clase a partir de las variables |
+
+Los cuatro se evalúan con las mismas métricas sobre el conjunto de prueba: recall y PR-AUC por
+clase de riesgo ("se vacía" y "se llena"), no exactitud (ver decisión 1).
+
+### Por qué
+
+- **Clase mayoritaria:** es el piso mínimo. Como las clases de riesgo son ~1% de las ventanas,
+  tiene exactitud alta pero recall de 0 en las clases de riesgo: muestra por qué la exactitud no
+  sirve como métrica.
+- **Persistencia semanal:** es una regla simple que sí detecta riesgo, así que es la referencia
+  real que un modelo debe superar. Se usa la semana anterior y no el día anterior porque los
+  días hábiles y los fines de semana tienen patrones distintos, y porque es el mismo tipo de
+  baseline que el ML Canvas propone para P1. Solo usa información disponible al momento de
+  predecir (la noche anterior).
+- **`LogisticRegression`:** simple, rápida e interpretable (los coeficientes indican qué variable
+  pesa más). Sirve para saber si una relación aproximadamente lineal entre las variables y el
+  riesgo es suficiente.
+- **`HistGradientBoostingClassifier`:** captura relaciones no lineales y combinaciones de
+  variables (por ejemplo, hora pico en día hábil en una estación del centro) y está diseñado para
+  conjuntos grandes, como los ~20 millones de viajes agregados por estación y ventana.
+- **Ambos candidatos** manejan 3 clases, dan probabilidades por clase (`predict_proba`) para
+  ordenar la lista diaria de estaciones y aceptan `class_weight` para compensar que las clases de
+  riesgo sean minoritarias.
+
+### Alternativas descartadas
+
+- **Solo la clase mayoritaria como baseline:** con recall de 0 no sirve como referencia; cualquier
+  modelo que detecte algo de riesgo la supera.
+- **SVM y k vecinos más cercanos:** muy lentos con millones de filas, y SVM no da probabilidades
+  directamente.
+
+### Consecuencias
+
+- Para entrenar los modelos hace falta primero la etiqueta (inventario inicial y umbral) y las
+  variables de `features.py`.
+- La persistencia semanal no puede predecir la primera semana de datos; esas ventanas se excluyen
+  de la evaluación o caen antes del periodo de prueba.
