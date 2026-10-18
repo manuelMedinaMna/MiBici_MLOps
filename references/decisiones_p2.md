@@ -321,7 +321,9 @@ sin intervención, que es justo lo que el equipo de rebalanceo necesita saber.
 - Etiqueta final: 81.4% "sin riesgo", 9.8% "se vacía" y 8.8% "se llena", en 6,979,284 ventanas
   de 471 estaciones. El riesgo se concentra: la mitad de las estaciones pasa menos del 9% de sus
   ventanas en riesgo y el 10% pasa más de un tercio.
-- **Pendiente:** pasar la simulación a `features.py`.
+- La versión final está en `mibici_mlops/features.py`: `python -m mibici_mlops.features p2` guarda
+  la etiqueta y la frecuencia de las últimas 4 semanas en `data/processed/p2_ventanas.parquet`. Da
+  la misma etiqueta que el notebook en todas las ventanas.
 
 ## 6. Partición temporal y momento de predicción
 

@@ -18,6 +18,11 @@ EXTERNAL_DATA_DIR = DATA_DIR / "external"
 
 MODELS_DIR = PROJ_ROOT / "models"
 
+# Archivos que usan varios módulos
+VIAJES_PATH = INTERIM_DATA_DIR / "viajes.parquet"
+ESTACIONES_PATH = RAW_DATA_DIR / "estaciones" / "nomenclatura_2026_09.csv"
+P2_VENTANAS_PATH = PROCESSED_DATA_DIR / "p2_ventanas.parquet"
+
 # Periodo de análisis: primer día con uso recuperado tras la pandemia.
 # Ver references/decisiones.md, decisión 2.
 FECHA_INICIO = "2022-03-01"
@@ -33,6 +38,14 @@ FECHA_INICIO_PRUEBA = "2026-04-01"
 # Registro de experimentos: un solo experimento de MLflow para P1, P2 y P3.
 EXPERIMENTO_MLFLOW = "mibici-equipo43"
 SEMILLA = 43
+
+# P2: etiqueta de riesgo y baseline de frecuencia. Ver references/decisiones_p2.md, decisiones 2
+# (ventana), 3 (semanas de historia), 4 (reinicio e inventario inicial) y 5 (umbral).
+# La hora de reinicio debe coincidir con el inicio de una ventana.
+P2_VENTANA = "2h"
+P2_HORA_REINICIO = 4
+P2_INVENTARIO_INICIAL = 0.5
+P2_SEMANAS_HISTORIA = 4
 
 REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
