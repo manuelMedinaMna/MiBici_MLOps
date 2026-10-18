@@ -52,8 +52,8 @@ python -m mibici_mlops.dataset
 
 Si un resultado no coincide, avisa al equipo con el mensaje de error antes de seguir.
 
-Al clonar, `data/` solo trae `.gitignore` y `raw.dvc`: `dvc pull` crea `data/raw/` y
-`dataset.py` crea `data/interim/`. `data/processed/` aún no lo genera ningún script.
+Al clonar, `data/` solo trae `.gitignore` y `raw.dvc`: `dvc pull` crea `data/raw/`,
+`dataset.py` crea `data/interim/` y `features.py` crea `data/processed/` (ver la sección de P2).
 
 ### Versionar cambios en los datos
 
@@ -64,6 +64,66 @@ git commit -m "Actualizar datos"
 dvc push        # si falla con WinError 10054: dvc push -j 2
 git push
 ```
+
+## P2: riesgo de que una estación se vacíe o se llene
+
+**Pregunta:** ¿una estación estará en riesgo de quedarse sin bicicletas o sin anclajes en un
+periodo futuro? La usa el equipo de rebalanceo para decidir a qué estaciones ir y si debe llevar o
+retirar bicicletas.
+
+Las decisiones y su justificación están en
+[references/decisiones_p2.md](references/decisiones_p2.md), y el análisis que las respalda en
+`notebooks/2.0-rc-p2-tamano-ventana.ipynb` (ventanas: secciones 1 a 10; hora de reinicio: 11;
+etiqueta: 12; partición: 13).
+
+| Aspecto | Decisión |
+|---|---|
+| Tarea | Clasificación en 3 clases: sin riesgo, se vacía, se llena |
+| Granularidad | Estación y ventana de 2 horas (00:00, 02:00, …, 22:00) |
+| Horizonte | Cada día a las 4:00 se predicen las 12 ventanas del día |
+| Etiqueta | Inventario simulado: cada estación empieza el día (4:00) al 50% de su capacidad y se le suman las llegadas y restan las salidas. "Se vacía" si llega a 0 o menos; "se llena" si llega a la capacidad |
+| Datos | Viajes del 2022-03-01 al 2026-09-30 y capacidad de cada estación. No usa datos de los usuarios (id, género ni año de nacimiento) |
+| Partición | Por fechas: entrenamiento 2022-03 a 2025-09, validación 2025-10 a 2026-03 y prueba 2026-04 a 2026-09 |
+| Métricas | Recall, precisión y PR-AUC de cada clase de riesgo en el conjunto de prueba |
+
+### Cómo correrlo
+
+Después de `python -m mibici_mlops.dataset`:
+
+```powershell
+python -m mibici_mlops.features p2                  # etiqueta y variables (~35 s, ~3.6 GB de RAM)
+python -m mibici_mlops.modeling.train_p2            # baselines registrados en MLflow (~30 s)
+mlflow ui --backend-store-uri sqlite:///mlflow.db   # ver los runs en http://127.0.0.1:5000
+```
+
+| Comando | Resultado esperado |
+|---|---|
+| `features p2` | `6,979,284 ventanas de 471 estaciones` y clases `sin_riesgo: 81.39`, `se_vacia: 9.77`, `se_llena: 8.83` |
+| `train_p2` | Dos runs en el experimento `mibici-equipo43`: `p2-baseline-clase-mayoritaria` y `p2-baseline-frecuencia-4-semanas` |
+
+Los runs se guardan en `mlflow.db` y `mlruns/`, que no se suben a Git. Conviene correr `train_p2`
+con todo en commit: cada run registra el commit y si había cambios sin commit.
+
+### Resultados de los baselines (conjunto de prueba)
+
+| Métrica | Clase mayoritaria | Frecuencia 4 semanas | Azar |
+|---|---|---|---|
+| PR-AUC se vacía | 0.057 | **0.368** | 0.057 |
+| PR-AUC se llena | 0.072 | **0.539** | 0.072 |
+| Recall se vacía | 0 | 0.470 | — |
+| Precisión se vacía | 0 | 0.461 | — |
+| Recall se llena | 0 | 0.623 | — |
+| Precisión se llena | 0 | 0.593 | — |
+
+- **Clase mayoritaria:** predice siempre "sin riesgo". Acierta en el 87% de las ventanas de prueba,
+  pero no detecta ningún riesgo; por eso la exactitud no sirve como métrica.
+- **Frecuencia de las últimas 4 semanas** (misma estación, mismo día de la semana y misma ventana):
+  detecta casi la mitad de las ventanas "se vacía" y el 62% de las "se llena", con una PR-AUC
+  entre 6.5 y 7.5 veces la del azar. Es la referencia que deben superar los modelos candidatos
+  (`LogisticRegression` y `HistGradientBoostingClassifier` con pesos de clase).
+- **Azar** es la proporción de cada clase en prueba: la PR-AUC de un modelo que no distingue nada.
+
+Las capturas de MLflow están en `reports/figures/mlflow_p2_*.png`.
 
 ## Project Organization
 
@@ -109,7 +169,8 @@ git push
     ├── modeling                
     │   ├── __init__.py 
     │   ├── predict.py          <- Code to run model inference with trained models          
-    │   └── train.py            <- Code to train models
+    │   ├── train.py            <- Code to train models
+    │   └── train_p2.py         <- P2: baselines registrados en MLflow
     │
     └── plots.py                <- Code to create visualizations
 ```
