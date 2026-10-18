@@ -1,4 +1,5 @@
 dvc[gdrive]
+folium
 ipykernel
 loguru
 matplotlib
@@ -8,6 +9,8 @@ pip
 pyarrow
 python-dotenv
 ruff
+seaborn
+scikit-learn
 tqdm
 typer
 -e .

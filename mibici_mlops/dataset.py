@@ -44,6 +44,8 @@ ESQUEMA = pa.schema(
         ("fin", pa.timestamp("s")),
         ("origen_id", pa.int32()),
         ("destino_id", pa.int32()),
+        ("origen", pa.string()),
+        ("destino", pa.string()),
         ("origen_lon", pa.float64()),
         ("origen_lat", pa.float64()),
         ("destino_lon", pa.float64()),
@@ -136,8 +138,10 @@ def quitar_duplicados(df: pd.DataFrame, nombre: str) -> pd.DataFrame:
 def unir_estaciones(df: pd.DataFrame, estdf: pd.DataFrame) -> pd.DataFrame:
     """Une las estaciones a los viajes."""
     con_est = df.copy()
+    con_est["origen"] = con_est.origen_id.map(estdf.name)
     con_est["origen_lon"] = a_float(con_est.origen_id.map(estdf.longitude))
     con_est["origen_lat"] = a_float(con_est.origen_id.map(estdf.latitude))
+    con_est["destino"] = con_est.destino_id.map(estdf.name)
     con_est["destino_lon"] = a_float(con_est.destino_id.map(estdf.longitude))
     con_est["destino_lat"] = a_float(con_est.destino_id.map(estdf.latitude))
     return con_est
