@@ -309,8 +309,145 @@ sin intervención, que es justo lo que el equipo de rebalanceo necesita saber.
 
 ### Consecuencias
 
-- Una ventana puede cumplir las dos reglas a la vez, pero pasa en solo el 0.01% de las ventanas.
-  **Pendiente:** definir qué clase se le asigna (por ejemplo, la que ocurrió primero).
-- **Pendiente:** las cifras de esta decisión salen de un script de prueba. La simulación del
-  inventario debe agregarse a un notebook para que sean reproducibles y después pasar a
-  `features.py`.
+- Una ventana puede cumplir las dos reglas a la vez (709 ventanas, 0.01%). Se le asigna la clase
+  del umbral más cercano al inventario con que empieza la ventana: 664 de las 709 empiezan ya
+  vacías o ya llenas, así que es la clase que ocurrió primero; en las otras 45 es una
+  aproximación. 566 de las 709 son de la estación 51 (López Cotilla / Penitenciaría).
+- Las cifras de esta decisión se reproducen en la sección 12 de
+  `notebooks/2.0-rc-p2-tamano-ventana.ipynb`. Dos detalles de la simulación: el 50% de la
+  capacidad no se redondea (con capacidad impar, las dos clases quedan a la misma distancia) y los
+  movimientos del mismo segundo se ordenan de forma estable (primero las salidas), para que el
+  resultado no dependa de la versión de pandas.
+- Etiqueta final: 81.4% "sin riesgo", 9.8% "se vacía" y 8.8% "se llena", en 6,979,284 ventanas
+  de 471 estaciones. El riesgo se concentra: la mitad de las estaciones pasa menos del 9% de sus
+  ventanas en riesgo y el 10% pasa más de un tercio.
+- **Pendiente:** pasar la simulación a `features.py`.
+
+## 6. Partición temporal y momento de predicción
+
+- **Fecha:** 2026-10-17
+- **Estado:** vigente
+- **Aplica a:** el entrenamiento y la evaluación de P2 (baselines y candidatos).
+
+### Contexto
+
+Los modelos se evalúan con datos que no vieron al entrenar. Como P2 predice el futuro, la
+partición no puede ser aleatoria: si una ventana de mañana queda en entrenamiento y la de hoy en
+prueba, el modelo aprende con información del futuro. También hay que fijar en qué momento se
+hace la predicción, porque las variables solo pueden usar lo que ya pasó a esa hora.
+
+### Decisión
+
+**Partición por fechas**, según el día de la simulación (de 4:00 a 3:59, decisión 4):
+
+| Conjunto | Periodo | Meses | Ventanas | Se vacía | Se llena |
+|---|---|---|---|---|---|
+| Entrenamiento | 2022-03-01 a 2025-09-30 | 43 | 5,247,312 | 10.8% | 9.2% |
+| Validación | 2025-10-01 a 2026-03-31 | 6 | 809,388 | 7.8% | 8.3% |
+| Prueba | 2026-04-01 a 2026-09-30 | 6 | 922,584 | 5.7% | 7.2% |
+
+**Momento de predicción:** cada día a las 4:00, para las 12 ventanas de ese día. Las variables
+solo usan datos hasta las 3:59.
+
+Las fechas están en `mibici_mlops/config.py` (`FECHA_INICIO`, `FECHA_INICIO_VALIDACION`,
+`FECHA_INICIO_PRUEBA` y `FECHA_FIN`). Las cifras salen de la sección 13 de
+`notebooks/2.0-rc-p2-tamano-ventana.ipynb`.
+
+### Por qué
+
+- **Por fechas y en orden:** los conjuntos no se mezclan y la prueba es lo más reciente, como
+  cuando el modelo se use de verdad.
+- **Validación y prueba juntas cubren un año completo** (octubre de 2025 a septiembre de 2026),
+  con vacaciones de diciembre, Semana Santa y temporada de lluvias.
+- **Septiembre de 2026 queda en prueba:** tiene 127% de los viajes de septiembre de 2019, el valor
+  más alto de la comparación (decisión 2 de `decisiones.md`), pero los datos son reales y es lo
+  que el modelo enfrentaría.
+- **A las 4:00** ya se conoce todo el día anterior y todavía no empieza la operación. Coincide
+  con el ML Canvas: corrida nocturna con datos hasta el cierre del día anterior.
+
+### Hallazgos
+
+- **El riesgo baja con el tiempo:** las clases de riesgo son el 20% de las ventanas de
+  entrenamiento, el 16% de las de validación y el 13% de las de prueba.
+- **Durante la prueba abren 98 estaciones** (mayo a agosto de 2026): son el 12% de las ventanas
+  de prueba y casi nunca están en riesgo (~3%). Aun sin ellas, el riesgo en prueba (14%) es menor
+  que en entrenamiento.
+
+### Alternativas descartadas
+
+- **Partición aleatoria:** mezcla días futuros en el entrenamiento.
+- **Sacar de la prueba las estaciones nuevas:** la prueba se vería mejor, pero en uso real el
+  modelo sí tendría que lidiar con ellas.
+- **Validación cruzada temporal (varios cortes):** más robusta, pero más compleja; se puede usar
+  al ajustar los candidatos.
+
+### Consecuencias
+
+- Los baselines no usan validación (no tienen nada que ajustar); los candidatos la usarán para
+  elegir hiperparámetros.
+- Los modelos se comparan siempre en el mismo conjunto. Las métricas de validación y de prueba no
+  se comparan entre sí: la proporción de riesgo es distinta y la PR-AUC depende de ella.
+- El baseline de frecuencia usa las 4 semanas anteriores aunque caigan en otro conjunto (por
+  ejemplo, abril de 2026 usa semanas de marzo). No es fuga: a las 4:00 esas semanas ya pasaron.
+- `FECHA_FIN` fija el periodo: si se descargan meses nuevos, los resultados no cambian hasta que
+  se mueva esa fecha.
+
+## 7. Evaluación y registro de los baselines en MLflow
+
+- **Fecha:** 2026-10-17
+- **Estado:** vigente
+- **Aplica a:** los runs de P2 en MLflow.
+
+### Contexto
+
+La decisión 3 define los baselines y las métricas (recall y PR-AUC por clase de riesgo). Para
+registrarlos en MLflow falta fijar cómo el baseline de frecuencia elige una clase, cómo se llaman
+las métricas y qué se registra para poder repetir cada run.
+
+### Decisión
+
+- **Baseline de frecuencia:** para cada clase, la fracción de las últimas 4 semanas (misma
+  estación, mismo día de la semana y misma ventana) en que hubo esa clase. Las semanas en que la
+  estación todavía no existía cuentan como "sin riesgo". Predice la clase más frecuente; en
+  empate gana, en este orden, "se vacía", "se llena" y "sin riesgo". Ejemplo: 2 semanas "se
+  vacía" y 2 "sin riesgo" → "se vacía".
+- **Métricas**, sobre el conjunto de prueba y para cada clase de riesgo:
+
+  | Métrica | En scikit-learn | Nombres en MLflow |
+  |---|---|---|
+  | Recall | `recall_score` | `test_recall_se_vacia`, `test_recall_se_llena` |
+  | Precisión | `precision_score` | `test_precision_se_vacia`, `test_precision_se_llena` |
+  | PR-AUC | `average_precision_score` | `test_pr_auc_se_vacia`, `test_pr_auc_se_llena` |
+
+- **Parámetros de cada run:** fechas de la partición, versión de los datos (el md5 de
+  `data/raw.dvc`), semilla y el modelo con sus hiperparámetros.
+- **Etiquetas:** equipo (`43`), pregunta (`P2`) y commit de Git.
+- **Experimento:** `mibici-equipo43`, el mismo para P1, P2 y P3; semilla `43`. Ambos en
+  `config.py`.
+
+### Por qué
+
+- **Empate a favor del riesgo:** el ML Canvas prioriza el recall de las clases de riesgo, porque
+  es peor dejar a un usuario sin bicicleta o sin anclaje que mandar un camión de más. El orden
+  entre "se vacía" y "se llena" es arbitrario, pero fijo.
+- **Precisión además de recall:** un modelo que marca todo como riesgo tiene recall de 100% y no
+  sirve; la precisión lo delata.
+- **PR-AUC y no ROC-AUC:** con clases minoritarias, la ROC-AUC puede verse alta aunque el modelo
+  dé muchas falsas alarmas; la PR-AUC se enfoca en la clase de riesgo. Además no depende de un
+  umbral, así que compara baselines y candidatos con sus probabilidades.
+- **md5 de DVC como versión de los datos:** DVC ya calcula el hash de `data/raw/` en
+  `data/raw.dvc`; si cambia cualquier archivo, cambia el hash.
+- **Semilla:** los baselines no tienen nada aleatorio, pero queda registrada para los candidatos.
+
+### Alternativas descartadas
+
+- **Exactitud (accuracy):** predecir siempre "sin riesgo" da 87% de exactitud en prueba sin
+  detectar nada (decisión 1).
+- **Manifiesto propio con hashes:** repetiría lo que ya hace DVC.
+
+### Consecuencias
+
+- Los dos baselines son dos runs del mismo experimento; sirven para la captura de comparación de
+  runs.
+- Los runs se ejecutan con todo en commit, para que el commit registrado sea el código que los
+  produjo.
