@@ -233,13 +233,15 @@ def main(ventanas_path: Path = P2_VENTANAS_PATH):
         logger.warning(
             "Hay cambios sin commit: el commit registrado no es todo el código que corrió"
         )
-    # mlflow.user se reemplaza para no registrar el usuario de la computadora (dato personal).
+    # mlflow.user y mlflow.source.name se reemplazan para no registrar el usuario de la computadora
+    # ni la ruta de su carpeta personal (datos personales).
     etiquetas = {
         "equipo": "43",
         "pregunta": "P2",
         "commit": commit,
         "cambios_sin_commit": str(cambios_sin_commit).lower(),
         "mlflow.user": "equipo43",
+        "mlflow.source.name": Path(__file__).resolve().relative_to(PROJ_ROOT).as_posix(),
     }
     parametros = {
         "fecha_inicio": FECHA_INICIO,
