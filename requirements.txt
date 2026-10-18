@@ -10,4 +10,7 @@ python-dotenv
 ruff
 tqdm
 typer
+mlflow
+pytest
+scikit-learn
 -e .
