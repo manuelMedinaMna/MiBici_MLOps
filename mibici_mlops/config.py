@@ -21,6 +21,10 @@ EXTERNAL_DATA_DIR = DATA_DIR / "external"
 
 MODELS_DIR = PROJ_ROOT / "models"
 
+# Periodo de análisis: primer día con uso recuperado tras la pandemia.
+# Ver references/decisiones.md, decisión 2.
+FECHA_INICIO = "2022-03-01"
+
 REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 

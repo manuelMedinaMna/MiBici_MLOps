@@ -107,3 +107,50 @@ Usar los viajes **desde el 1 de marzo de 2022** hasta el último mes disponible.
 - **Pendiente:** septiembre de 2026 tiene 127% de los viajes de septiembre de 2019, el máximo
   de la serie. Los datos parecen correctos (mismos usuarios haciendo más viajes y más cortos
   desde mediados de mes), pero falta decidir cómo tratarlo en la partición de prueba.
+
+## 3. P2 como clasificación de 3 clases: sin riesgo, se vacía, se llena
+
+- **Fecha:** 2026-10-16
+- **Estado:** vigente
+- **Aplica a:** P2 (riesgo de quedarse sin bicicletas o sin anclajes).
+
+### Contexto
+
+P2 pregunta si una estación estará en riesgo de quedarse sin bicicletas o sin anclajes
+disponibles. El ML Canvas (iteración 1) la planteaba como clasificación binaria: riesgo sí/no.
+
+### Decisión
+
+Clasificar cada estación y periodo en **3 clases**:
+
+| Clase | Significado | Acción del equipo de rebalanceo |
+|---|---|---|
+| Sin riesgo | La estación opera normal | Ninguna |
+| Se vacía | Salen más bicicletas de las que llegan; puede quedarse sin bicicletas | Llevar bicicletas |
+| Se llena | Llegan más bicicletas de las que salen; puede quedarse sin anclajes | Retirar bicicletas |
+
+### Por qué
+
+- **Las acciones son opuestas.** Con la clasificación binaria el equipo sabría a qué estación
+  ir, pero no si debe llegar con bicicletas o con espacio para recogerlas.
+- **Los datos lo permiten.** El riesgo se aproxima con el balance neto de viajes
+  (llegadas − salidas), cuyo signo indica si la estación se vacía o se llena.
+- **Los modelos candidatos no cambian.** `LogisticRegression` y
+  `HistGradientBoostingClassifier` de scikit-learn manejan 3 clases igual que 2 y dan
+  probabilidades por clase (`predict_proba`) para ordenar la lista de estaciones.
+
+### Alternativa descartada
+
+**Clasificación binaria (riesgo / sin riesgo).** Es más simple, pero pierde la dirección del
+riesgo, que es justo lo que el equipo de rebalanceo necesita para actuar.
+
+### Consecuencias
+
+- Las clases de riesgo serán minoritarias (la mayor parte del tiempo las estaciones operan
+  normal). La exactitud (accuracy) no sirve como métrica: se usan recall y PR-AUC por clase, y
+  pesos de clase (`class_weight`) en los modelos.
+- El baseline de clase mayoritaria tendrá recall de 0 en las clases de riesgo; sirve como
+  piso, no como referencia útil.
+- Hay que actualizar la sección de P2 del ML Canvas (`references/MLCanvas_MiBici.pdf`).
+- **Pendiente:** definir con qué umbral el balance neto frente a la capacidad cuenta como
+  "se vacía" o "se llena".
