@@ -3,6 +3,17 @@
 /data/processed/
 /data/external/
 
+# MLflow: base de datos de los runs y artefactos (se generan al correr los experimentos)
+mlflow.db
+mlruns/
+mlartifacts/
+
+# Modelos serializados
+/models/*
+!/models/.gitkeep
+*.pkl
+*.joblib
+
 # Mac OS-specific storage files
 .DS_Store
 

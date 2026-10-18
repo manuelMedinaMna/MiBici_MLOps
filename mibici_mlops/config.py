@@ -35,8 +35,11 @@ FECHA_FIN = "2026-09-30"
 FECHA_INICIO_VALIDACION = "2025-10-01"
 FECHA_INICIO_PRUEBA = "2026-04-01"
 
-# Registro de experimentos: un solo experimento de MLflow para P1, P2 y P3.
+# Registro de experimentos: un solo experimento de MLflow para P1, P2 y P3. Los runs se guardan en
+# mlflow.db y los artefactos en mlruns/, en la raíz del proyecto, desde donde sea que se corra.
 EXPERIMENTO_MLFLOW = "mibici-equipo43"
+MLFLOW_TRACKING_URI = f"sqlite:///{(PROJ_ROOT / 'mlflow.db').as_posix()}"
+MLFLOW_ARTIFACTS_DIR = PROJ_ROOT / "mlruns"
 SEMILLA = 43
 
 # P2: etiqueta de riesgo y baseline de frecuencia. Ver references/decisiones_p2.md, decisiones 2
