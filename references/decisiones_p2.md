@@ -48,8 +48,7 @@ riesgo, que es justo lo que el equipo de rebalanceo necesita para actuar.
 - El baseline de clase mayoritaria tendrá recall de 0 en las clases de riesgo; sirve como
   piso, no como referencia útil.
 - Hay que actualizar la sección de P2 del ML Canvas (`references/MLCanvas_MiBici.pdf`).
-- **Pendiente:** definir con qué umbral el balance neto frente a la capacidad cuenta como
-  "se vacía" o "se llena".
+- El umbral que define "se vacía" y "se llena" está en la decisión 5.
 
 ## 2. Predecir el riesgo en ventanas de 2 horas
 
@@ -109,8 +108,7 @@ coincide con el ML Canvas.
   inventario se puede simular viaje por viaje y marcar la ventana como "se vacía" o "se llena"
   si en cualquier momento dentro de ella se cruza el umbral.
 - Los porcentajes de arriba usan el umbral provisional; con la etiqueta final cambiarán.
-- **Pendiente para la decisión de la etiqueta:** con cuántas bicicletas se supone que empieza
-  cada estación y qué umbral cuenta como riesgo.
+- El inventario inicial y el umbral de la etiqueta final están en las decisiones 4 y 5.
 - **Pendiente de revisión:** 3.6% de los viajes dura menos de 1 minuto y 45 duran más de
   24 horas.
 
@@ -240,5 +238,79 @@ inicial se le suman las llegadas y se le restan las salidas, y no se reinicia en
 - Los porcentajes de riesgo de la decisión 2 se calcularon reiniciando cada ventana; con esta
   regla cambiarán. La elección de la ventana de 2 horas no depende de eso, porque todos los
   tamaños se compararon con la misma regla.
-- **Pendiente:** con qué umbral el inventario estimado cuenta como "se vacía" o "se llena" (por
-  ejemplo, llegar a 0 o a la capacidad, o quedar a menos de cierto margen).
+- El umbral que define "se vacía" y "se llena" está en la decisión 5.
+
+## 5. Umbral de riesgo: llegar a 0 bicicletas o a la capacidad
+
+- **Fecha:** 2026-10-17
+- **Estado:** vigente
+- **Aplica a:** el cálculo de la etiqueta de P2.
+
+### Contexto
+
+Con el inventario simulado de la decisión 4, falta decidir a partir de qué nivel una ventana
+cuenta como riesgo. Se compararon umbrales de 0%, 10%, 20% y 30% de la capacidad, simulando el
+inventario de todas las estaciones desde 2022-03 y contando también las ventanas sin viajes (si
+una estación quedó vacía y nadie llegó después, sigue vacía).
+
+### Decisión
+
+En cada ventana de 2 horas se toma el inventario simulado más bajo y el más alto que alcanzó la
+estación:
+
+| Clase | Regla |
+|---|---|
+| Se vacía | El inventario más bajo llega a 0 o menos |
+| Se llena | El inventario más alto llega a la capacidad o más |
+| Sin riesgo | Ninguna de las dos |
+
+La etiqueta se interpreta como **riesgo sin intervención**: "si la estación empezara el día a la
+mitad y nadie la rebalanceara, en esta ventana se quedaría sin bicicletas (o sin anclajes)".
+
+### Por qué
+
+| Umbral | Se vacía | Se llena | Total en riesgo |
+|---|---|---|---|
+| **0%** | 9.8% | 8.8% | **~19%** |
+| 10% | 15.2% | 12.6% | ~28% |
+| 20% | 21.2% | 16.7% | ~38% |
+| 30% | 32.9% | 24.1% | ~57% |
+
+- **Con 20% o 30%, entre el 38% y el 57% de las ventanas serían alerta.** Una alerta que aparece
+  casi la mitad del tiempo no ayuda al equipo de rebalanceo a decidir a dónde ir primero.
+- **Con 0% la etiqueta tiene un significado claro** ("sin intervención, se queda vacía o llena")
+  y las clases quedan minoritarias pero no rarísimas, repartidas casi igual entre "se vacía" y
+  "se llena".
+- **La anticipación no depende del umbral.** La predicción se hace la noche anterior para el día
+  siguiente, y el equipo actúa según la probabilidad que da el modelo, no según el hecho de que la
+  estación ya esté vacía.
+
+### Hallazgo: el inventario simulado sale de lo posible
+
+En el 9.8% de las ventanas el inventario simulado queda por debajo de 0 y en el 8.8% por encima
+de la capacidad, lo que en la realidad no puede pasar (nadie saca una bicicleta de una estación
+vacía). Indica que durante el día alguien rebalanceó la estación o que empezó con más o menos
+del 50%. Por eso la etiqueta no dice que la estación se quedó vacía, sino que se quedaría vacía
+sin intervención, que es justo lo que el equipo de rebalanceo necesita saber.
+
+### Alternativas descartadas
+
+- **Umbrales de 10% a 30%:** más anticipación en la etiqueta, pero demasiadas ventanas en alerta.
+- **Dos niveles de alerta en la etiqueta (alerta y alerta roja):** convertiría las 3 clases en 5 y
+  haría más raras las clases de riesgo. La severidad se obtiene de la probabilidad del modelo:
+
+  | Probabilidad de la clase de riesgo | Alerta |
+  |---|---|
+  | ≥ 70% | Roja: ir primero |
+  | 40–70% | Amarilla: ir si hay tiempo |
+  | < 40% | Sin acción |
+
+  Estos cortes son una propuesta para el equipo de rebalanceo, no una decisión del modelo.
+
+### Consecuencias
+
+- Una ventana puede cumplir las dos reglas a la vez, pero pasa en solo el 0.01% de las ventanas.
+  **Pendiente:** definir qué clase se le asigna (por ejemplo, la que ocurrió primero).
+- **Pendiente:** las cifras de esta decisión salen de un script de prueba. La simulación del
+  inventario debe agregarse a un notebook para que sean reproducibles y después pasar a
+  `features.py`.
