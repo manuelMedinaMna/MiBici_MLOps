@@ -8,8 +8,14 @@ con la etiqueta y la frecuencia de cada clase en las semanas anteriores. Las reg
 references/decisiones_p2.md y el análisis, en las secciones 12 y 13 de
 notebooks/2.0-rc-p2-tamano-ventana.ipynb.
 
+P3 (grupos de estaciones con patrones de uso parecidos): una fila por estación y conjunto
+(entrenamiento o prueba), con la fracción de sus salidas y llegadas en cada día de la semana y
+franja del día. Las reglas están en references/decisiones_p3.md y la exploración, en
+notebooks/1.0-im-initial-eda.ipynb.
+
 Uso:
     python -m mibici_mlops.features p2
+    python -m mibici_mlops.features p3
 """
 
 from pathlib import Path
@@ -24,11 +30,16 @@ from mibici_mlops.config import (
     ESTACIONES_PATH,
     FECHA_FIN,
     FECHA_INICIO,
+    FECHA_INICIO_PRUEBA,
+    FECHA_INICIO_VALIDACION,
     P2_HORA_REINICIO,
     P2_INVENTARIO_INICIAL,
     P2_SEMANAS_HISTORIA,
     P2_VENTANA,
     P2_VENTANAS_PATH,
+    P3_FRANJAS,
+    P3_MIN_VIAJES,
+    P3_PERFILES_PATH,
     VIAJES_PATH,
 )
 
@@ -252,6 +263,117 @@ def p2(
         f"{len(tabla):,} ventanas de {tabla['estacion'].nunique()} estaciones guardadas en "
         f"{output_path}. Clases (%): {porcentajes}"
     )
+
+
+# Días de la semana en el orden de `dt.dayofweek` (0 = lunes).
+DIAS_SEMANA = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"]
+
+
+def columnas_perfil(prefijo: str) -> list[str]:
+    """Nombres de las columnas del perfil de P3, p. ej. `sal_lun_manana` (decisión 2 de P3)."""
+    return [f"{prefijo}_{dia}_{franja}" for dia in DIAS_SEMANA for franja in P3_FRANJAS]
+
+
+def franja_del_dia(momentos: pd.Series) -> np.ndarray:
+    """Número de la franja del día de cada momento: 0 = madrugada, 1 = mañana, etc.
+
+    Las franjas empiezan a las horas de P3_FRANJAS. Por qué para P3: cuatro franjas bastan para
+    distinguir los usos que importan a planeación urbana (ir al trabajo o la escuela en la
+    mañana, regresar en la tarde, salir de noche) sin repartir los viajes de cada estación en
+    tantas columnas que el perfil quede con ruido (decisión 2).
+    """
+    return np.searchsorted(list(P3_FRANJAS.values()), momentos.dt.hour, side="right") - 1
+
+
+def perfil_de_uso(estacion: pd.Series, momentos: pd.Series, prefijo: str) -> pd.DataFrame:
+    """Fracción de los viajes de cada estación en cada día de la semana y franja del día.
+
+    Una fila por estación y 28 columnas (7 días × 4 franjas) que suman 1. Por qué para P3: al
+    dividir entre el total de la estación se comparan sus patrones de uso, no su volumen; si no,
+    los grupos solo separarían estaciones muy usadas de poco usadas (decisión 2).
+    """
+    codigo = momentos.dt.dayofweek.to_numpy() * len(P3_FRANJAS) + franja_del_dia(momentos)
+    conteo = (
+        pd.DataFrame({"estacion": estacion.to_numpy(), "codigo": codigo})
+        .value_counts()
+        .unstack(fill_value=0)
+        .reindex(columns=range(len(DIAS_SEMANA) * len(P3_FRANJAS)), fill_value=0)
+    )
+    conteo.columns = columnas_perfil(prefijo)
+    return conteo.div(conteo.sum(axis=1), axis=0)
+
+
+def perfiles_estaciones(
+    viajes: pd.DataFrame,
+    estaciones: np.ndarray,
+    desde: str,
+    hasta: str,
+    min_viajes: int = P3_MIN_VIAJES,
+) -> pd.DataFrame:
+    """Perfil de salidas y llegadas de cada estación con los viajes que inician en [desde, hasta).
+
+    Agrega el promedio de salidas y llegadas por día y el balance (llegadas - salidas) / total,
+    que no se usan para agrupar sino para describir cada grupo. Deja fuera las estaciones que
+    no están en el catálogo y las que tienen menos de `min_viajes` salidas o llegadas.
+
+    Por qué para P3: las salidas dicen a qué hora la gente toma bicicletas en la estación y las
+    llegadas a qué hora las deja; juntas distinguen, por ejemplo, una estación de vivienda (sale
+    en la mañana, llega en la tarde) de una de trabajo (al revés). Con pocos viajes las
+    fracciones son ruido (decisión 3). Recibir el periodo permite calcular el perfil solo con
+    los datos de entrenamiento y, por separado, con los de prueba (decisión 4).
+    """
+    periodo = viajes[viajes["inicio"].between(desde, hasta, inclusive="left")]
+    salidas = periodo["origen_id"].value_counts()
+    llegadas = periodo["destino_id"].value_counts()
+    dias = (pd.Timestamp(hasta) - pd.Timestamp(desde)).days
+
+    perfil = perfil_de_uso(periodo["origen_id"], periodo["inicio"], "sal").join(
+        perfil_de_uso(periodo["destino_id"], periodo["fin"], "lle"), how="inner"
+    )
+    perfil["salidas_dia"] = salidas / dias
+    perfil["llegadas_dia"] = llegadas / dias
+    perfil["balance"] = (llegadas - salidas) / (llegadas + salidas)
+
+    suficientes = (salidas.reindex(perfil.index) >= min_viajes) & (
+        llegadas.reindex(perfil.index) >= min_viajes
+    )
+    return perfil[perfil.index.isin(estaciones) & suficientes]
+
+
+@app.command()
+def p3(
+    viajes_path: Path = VIAJES_PATH,
+    estaciones_path: Path = ESTACIONES_PATH,
+    output_path: Path = P3_PERFILES_PATH,
+):
+    """P3: perfil de uso de cada estación en los periodos de entrenamiento y de prueba."""
+    estaciones = pd.read_csv(estaciones_path)["id"].to_numpy()
+    viajes = pd.read_parquet(
+        viajes_path,
+        columns=["inicio", "fin", "origen_id", "destino_id"],
+        filters=[
+            ("inicio", ">=", pd.Timestamp(FECHA_INICIO)),
+            ("inicio", "<", pd.Timestamp(FECHA_FIN) + pd.Timedelta(days=1)),
+        ],
+    )
+    logger.info(f"{len(viajes):,} viajes de {FECHA_INICIO} a {FECHA_FIN}")
+
+    # La validación no se usa: P3 no ajusta hiperparámetros con ella (decisión 4).
+    fin = (pd.Timestamp(FECHA_FIN) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    periodos = {
+        "entrenamiento": (FECHA_INICIO, FECHA_INICIO_VALIDACION),
+        "prueba": (FECHA_INICIO_PRUEBA, fin),
+    }
+    partes = []
+    for conjunto, (desde, hasta) in periodos.items():
+        perfil = perfiles_estaciones(viajes, estaciones, desde, hasta)
+        logger.info(f"{conjunto}: {len(perfil)} estaciones con perfil ({desde} a {hasta})")
+        partes.append(perfil.reset_index().assign(conjunto=conjunto))
+
+    tabla = pd.concat(partes, ignore_index=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tabla.to_parquet(output_path, index=False, compression="zstd")
+    logger.success(f"{len(tabla):,} perfiles guardados en {output_path}")
 
 
 if __name__ == "__main__":

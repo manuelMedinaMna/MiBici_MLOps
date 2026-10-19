@@ -19,7 +19,6 @@ Para ver los runs:
 """
 
 from pathlib import Path
-import subprocess
 
 from loguru import logger
 from matplotlib.figure import Figure
@@ -36,23 +35,21 @@ from sklearn.metrics import (
 import typer
 
 from mibici_mlops.config import (
-    DATA_DIR,
     EXPERIMENTO_MLFLOW,
     FECHA_FIN,
     FECHA_INICIO,
     FECHA_INICIO_PRUEBA,
     FECHA_INICIO_VALIDACION,
-    MLFLOW_ARTIFACTS_DIR,
     MLFLOW_TRACKING_URI,
     P2_HORA_REINICIO,
     P2_INVENTARIO_INICIAL,
     P2_SEMANAS_HISTORIA,
     P2_VENTANA,
     P2_VENTANAS_PATH,
-    PROJ_ROOT,
     SEMILLA,
 )
 from mibici_mlops.features import CLASES_P2
+from mibici_mlops.modeling.registro import etiquetas_run, usar_experimento, version_datos
 
 app = typer.Typer()
 
@@ -74,26 +71,6 @@ def asignar_conjunto(dia: pd.Series) -> pd.Series:
     conjunto[dia >= pd.Timestamp(FECHA_INICIO_VALIDACION)] = "validacion"
     conjunto[dia >= pd.Timestamp(FECHA_INICIO_PRUEBA)] = "prueba"
     return conjunto
-
-
-def version_datos(ruta: Path = DATA_DIR / "raw.dvc") -> str:
-    """md5 que DVC calculó para data/raw (decisión 7): cambia si cambia cualquier archivo crudo."""
-    for linea in ruta.read_text().splitlines():
-        if "md5:" in linea:
-            return linea.split("md5:")[1].strip()
-    raise ValueError(f"No se encontró el md5 en {ruta}")
-
-
-def estado_git() -> tuple[str, bool]:
-    """Commit actual y si hay cambios sin commit: liga cada run con el código que lo produjo."""
-
-    def git(*argumentos: str) -> str:
-        resultado = subprocess.run(
-            ["git", *argumentos], cwd=PROJ_ROOT, capture_output=True, text=True, check=True
-        )
-        return resultado.stdout.strip()
-
-    return git("rev-parse", "HEAD"), git("status", "--porcelain") != ""
 
 
 def baseline_clase_mayoritaria(entrenamiento: pd.DataFrame, prueba: pd.DataFrame) -> pd.DataFrame:
@@ -228,21 +205,7 @@ def main(ventanas_path: Path = P2_VENTANAS_PATH):
     prueba = tabla[tabla["conjunto"] == "prueba"]
     logger.info(f"Ventanas: {len(entrenamiento):,} de entrenamiento y {len(prueba):,} de prueba")
 
-    commit, cambios_sin_commit = estado_git()
-    if cambios_sin_commit:
-        logger.warning(
-            "Hay cambios sin commit: el commit registrado no es todo el código que corrió"
-        )
-    # mlflow.user y mlflow.source.name se reemplazan para no registrar el usuario de la computadora
-    # ni la ruta de su carpeta personal (datos personales).
-    etiquetas = {
-        "equipo": "43",
-        "pregunta": "P2",
-        "commit": commit,
-        "cambios_sin_commit": str(cambios_sin_commit).lower(),
-        "mlflow.user": "equipo43",
-        "mlflow.source.name": Path(__file__).resolve().relative_to(PROJ_ROOT).as_posix(),
-    }
+    etiquetas = etiquetas_run("P2", __file__)
     parametros = {
         "fecha_inicio": FECHA_INICIO,
         "fecha_fin": FECHA_FIN,
@@ -257,12 +220,7 @@ def main(ventanas_path: Path = P2_VENTANAS_PATH):
         "ventanas_prueba": len(prueba),
     }
 
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    if mlflow.get_experiment_by_name(EXPERIMENTO_MLFLOW) is None:
-        mlflow.create_experiment(
-            EXPERIMENTO_MLFLOW, artifact_location=MLFLOW_ARTIFACTS_DIR.as_uri()
-        )
-    mlflow.set_experiment(EXPERIMENTO_MLFLOW)
+    usar_experimento()
 
     registrar_run(
         "p2-baseline-clase-mayoritaria",
