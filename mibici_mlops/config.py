@@ -6,6 +6,9 @@ from loguru import logger
 # Load environment variables from .env file if it exists
 load_dotenv()
 
+# Semilla común para todos los modelos
+RANDOM_STATE = 67
+
 # Paths
 PROJ_ROOT = Path(__file__).resolve().parents[1]
 logger.info(f"PROJ_ROOT path is: {PROJ_ROOT}")
@@ -22,7 +25,10 @@ MODELS_DIR = PROJ_ROOT / "models"
 VIAJES_PATH = INTERIM_DATA_DIR / "viajes.parquet"
 ESTACIONES_PATH = RAW_DATA_DIR / "estaciones" / "nomenclatura_2026_09.csv"
 P2_VENTANAS_PATH = PROCESSED_DATA_DIR / "p2_ventanas.parquet"
+P3_CLUSTERS_PATH = PROCESSED_DATA_DIR / "p3_clusters.parquet"
 P3_PERFILES_PATH = PROCESSED_DATA_DIR / "p3_perfiles.parquet"
+P3_VIAJES_PATH = INTERIM_DATA_DIR / "p3_viajes.parquet"
+P3_MODEL_PATH = MODELS_DIR / "p3.joblib"
 
 # Página de datos abiertos de donde dataset.py descarga los CSV que falten en data/raw.
 # Ver references/fuentes_datos.md.
