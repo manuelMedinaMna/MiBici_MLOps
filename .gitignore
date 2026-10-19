@@ -202,3 +202,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# MLflow y modelos entrenados
+mlruns/
+mlartifacts/
+mlflow.db
+models/*.joblib
