@@ -4,6 +4,7 @@ ipykernel
 loguru
 matplotlib
 mkdocs
+mlflow
 pandas
 pip
 pyarrow
