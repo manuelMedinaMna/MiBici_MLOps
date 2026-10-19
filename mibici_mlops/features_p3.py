@@ -73,15 +73,52 @@ class P3:
             normalize="index",
         )
 
-        coords = df.groupby("origen_id")[["origen_lat", "origen_lon"]].median()
-        self.perfiles = perfiles.join(coords)
+        coords_origen = df[
+            ["origen_id", "origen_lat", "origen_lon"]
+        ].rename(columns={
+            "origen_id": "estacion_id",
+            "origen_lat": "lat",
+            "origen_lon": "lon",
+        })
+
+        coords_destino = df[
+            ["destino_id", "destino_lat", "destino_lon"]
+        ].rename(columns={
+            "destino_id": "estacion_id",
+            "destino_lat": "lat",
+            "destino_lon": "lon",
+        })
+
+        coords = (
+            pd.concat([coords_origen, coords_destino], ignore_index=True)
+            .dropna(subset=["estacion_id", "lat", "lon"])
+            .groupby("estacion_id")[["lat", "lon"]]
+            .median()
+            .rename(columns={
+                "lat": "origen_lat",
+                "lon": "origen_lon",
+            })
+        )
+        coords.index.name = "origen_id"
+
+        self.perfiles = perfiles.join(coords, how="left")
         self.perfiles.index.name = "origen_id"
-        return self.perfiles
+        self.prefiles = self.perfiles.rename_axis("origen_id").reset_index()
 
     def save(self, ruta_perfiles, ruta_viajes):
-        # Opcionalmente, se podrían guardar viajes_loc o num_viajes_por_dia, etc.
-        self.perfiles.to_parquet(ruta_perfiles, index=False, compression="zstd")
-        self.viajes_loc.to_parquet(ruta_viajes, index=False, compression="zstd")
+        # Opcionalmente, se podrían guardar num_viajes_*
+        perfiles = self.perfiles.rename_axis("origen_id").reset_index()
+
+        perfiles.to_parquet(
+            ruta_perfiles,
+            index=False,
+            compression="zstd",
+        )
+        self.viajes_loc.to_parquet(
+            ruta_viajes,
+            index=False,
+            compression="zstd",
+        )
 
 @app.command()
 def p3features(
@@ -99,7 +136,7 @@ def p3features(
             ("inicio", ">=", pd.Timestamp(fecha_inicio)),
             ("inicio", "<", pd.Timestamp(fecha_fin) + pd.Timedelta(days=1)),
         ],
-    )
+    ).dropna()
     logger.info(f"Conjunto de datos con {len(viajes):,} viajes de {fecha_inicio} a {fecha_fin} con {viajes.shape[1]} características")
 
     p3feat = P3(viajes)
