@@ -1,5 +1,5 @@
 dvc[gdrive]
-folium
+folium==0.20.0
 ipykernel
 loguru
 matplotlib
@@ -9,8 +9,8 @@ pip
 pyarrow
 python-dotenv
 ruff
-seaborn
-scikit-learn
+seaborn==0.13.2
+scikit-learn==1.9.1
 tqdm
 typer
 -e .
