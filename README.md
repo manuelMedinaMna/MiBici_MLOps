@@ -152,6 +152,31 @@ python -m mibici_mlops.modeling.train_p1            # baseline y gradient boosti
 pytest tests/test_features_p1.py                    # verifica que no haya fuga de datos
 ```
 
+**Datos y partición temporal** (marzo de 2022 a septiembre de 2026, con 468,138 filas estación-día para entrenamiento, 44,131 para validación y 64,879 para prueba):
+
+| Conjunto | Periodo |
+|---|---|
+| Entrenamiento | hasta 2025-12-31 |
+| Validación | 2026-01-01 a 2026-04-30 |
+| Prueba | 2026-05-01 a 2026-09-30 |
+
+**Resultados** (MAE y RMSE en viajes por estación y día; menor es mejor):
+
+| Modelo | val_mae | val_rmse | test_mae | test_rmse |
+|---|---|---|---|---|
+| Baseline: mismo día de la semana pasada | 8.39 | 15.98 | 7.85 | 15.22 |
+| Gradient boosting (`HistGradientBoostingRegressor`) | 6.10 | 11.65 | 5.97 | 11.47 |
+| Mejora frente al baseline | 27 % | 27 % | 24 % | 25 % |
+
+Configuración elegida con validación: pérdida de Poisson, `learning_rate` 0.1, `max_iter` 300 y `max_leaf_nodes` 63 (semilla 42). Los runs están en MLflow como `p1-baseline-semana-previa` y `p1-gradient-boosting`, y las gráficas en `reports/figures/p1_*`.
+
+**Interpretación**
+
+- El gradient boosting supera al baseline en las cuatro métricas, con una mejora de alrededor de una cuarta parte del error. Se cumple el criterio de despliegue de la propuesta (menor MAE y RMSE que el baseline en prueba).
+- Validación y prueba dan errores parecidos (el de prueba incluso es un poco menor), por lo que no hay señal de sobreajuste al periodo de validación.
+- El modelo gana todos los días de la semana. Su error es estable (entre 5.5 y 6.2 viajes), mientras que el del baseline varía más y es peor entre semana, sobre todo miércoles y viernes (cerca de 8.5 a 8.8). El domingo es el día más fácil para ambos.
+- El RMSE es casi el doble del MAE, así que hay estaciones-día con errores grandes, probablemente en estaciones de mucho uso, feriados o eventos. Falta confirmarlo con el análisis por nivel de uso (`p1_error_por_nivel_uso.csv`).
+
 Crea dos runs en el experimento `mibici-equipo43`: `p1-baseline-semana-previa` y
 `p1-gradient-boosting`. Las gráficas del análisis de error están en `reports/figures/p1_*`.
 
