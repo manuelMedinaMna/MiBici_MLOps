@@ -4,7 +4,59 @@
     <img src="https://img.shields.io/badge/CCDS-Project%20template-328F97?logo=cookiecutter" />
 </a>
 
-Realizar tareas de manipulación, preparación, exploración y preprocesamiento de datos, gestionando grandes volúmenes de datos distribuidos y aplicando técnicas de versionado de datos para asegurar la reproducibilidad y trazabilidad en proyectos de Machine Learning.
+Proyecto del equipo 43 (MLOps, TC5061.10). Usa los datos abiertos de MiBici, el sistema de
+bicicletas públicas de Guadalajara, para responder tres preguntas de negocio con un pipeline
+reproducible: ingesta, variables, entrenamiento y registro de experimentos en MLflow.
+
+| # | Pregunta | Quién la usa | Tarea |
+|---|---|---|---|
+| P1 | ¿Cuántos viajes iniciarán en cada estación el día siguiente? | Operación: repartir bicicletas y personal por zona y día | Regresión |
+| P2 | ¿Una estación estará en riesgo de quedarse sin bicicletas o sin anclajes? | Rebalanceo: a qué estaciones ir y si llevar o retirar bicicletas | Clasificación (3 clases) |
+| P3 | ¿Qué grupos de estaciones comparten patrones de uso y dónde están? | Planeación urbana: dónde y de qué tipo abrir estaciones | Clustering |
+
+El planteamiento completo está en el ML Canvas
+([references/MLCanvas_MiBici.pdf](references/MLCanvas_MiBici.pdf)).
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+    subgraph repo["Repositorio (GitHub)"]
+        config["config.py<br/>rutas, fechas, semilla,<br/>experimento MLflow"]
+        dataset["dataset.py<br/>descarga, limpieza<br/>y unión"]
+        feat["features.py (P2, P3)<br/>features_p1.py (P1)"]
+        train["modeling/<br/>train_p1.py · train_p2.py · train_p3.py"]
+        registro["modeling/registro.py<br/>etiquetas, commit y<br/>versión de datos"]
+    end
+
+    subgraph datos["data/ (fuera de Git)"]
+        raw[("raw/<br/>CSV de viajes<br/>y estaciones")]
+        interim[("interim/<br/>viajes.parquet")]
+        processed[("processed/<br/>variables por pregunta")]
+    end
+
+    portal["Portal de datos abiertos<br/>de MiBici"] -->|"CSV mensuales"| dataset
+    drive[("Google Drive<br/>remoto de DVC")] <-->|"dvc pull / dvc push"| raw
+    dataset -->|"guarda CSV"| raw
+    raw --> dataset
+    dataset --> interim
+    interim --> feat
+    feat --> processed
+    processed --> train
+    registro --> train
+    config -.-> dataset & feat & train
+
+    train -->|"parámetros, métricas,<br/>etiquetas y artefactos"| mlflow[("MLflow<br/>mlflow.db + mlruns/")]
+    train --> models[("models/")]
+    mlflow --> ui["mlflow ui<br/>comparar runs"]
+```
+
+- **Datos:** los CSV crudos se versionan con DVC en el Drive del equipo; `dataset.py` también
+  puede descargarlos del portal. Nada de `data/`, `models/`, `mlflow.db` ni `mlruns/` se sube a Git.
+- **Configuración única:** `config.py` define las rutas, el periodo (`FECHA_INICIO`, `FECHA_FIN`),
+  la partición temporal, la semilla (`SEMILLA`) y el experimento de MLflow (`mibici-equipo43`).
+- **Experimentos:** cada `train_*.py` registra sus runs en el mismo experimento con la etiqueta
+  `pregunta` (P1, P2 o P3), el commit de Git y la versión de los datos.
 
 ## Datos
 
@@ -72,6 +124,36 @@ git commit -m "Actualizar datos"
 dvc push        # si falla con WinError 10054: dvc push -j 2
 git push
 ```
+
+## P1: demanda de viajes por estación y día
+
+**Pregunta:** ¿cuántos viajes iniciarán en cada estación durante el día siguiente? La usa
+operación para repartir bicicletas y personal por zona y por día.
+
+Las decisiones y su justificación están en
+[references/decisiones_p1.md](references/decisiones_p1.md).
+
+| Aspecto | Decisión |
+|---|---|
+| Tarea | Regresión: viajes que inician en la estación durante el día |
+| Granularidad | Una fila por estación y día; los días sin viajes cuentan como 0 |
+| Horizonte | Cada día a las 23:59 se predice el día siguiente |
+| Variables | Historial que termina el día anterior (`lag_7d`, `media_7d`), calendario y datos de la estación |
+| Modelos | Baseline: mismo día de la semana pasada (`lag_7d`). Candidato: `HistGradientBoostingRegressor` |
+| Métricas | MAE y RMSE en viajes por estación-día (validación y prueba) |
+
+### Cómo correrlo
+
+Después de `python -m mibici_mlops.dataset`:
+
+```powershell
+python -m mibici_mlops.features_p1                  # variables por estación y día
+python -m mibici_mlops.modeling.train_p1            # baseline y gradient boosting en MLflow
+pytest tests/test_features_p1.py                    # verifica que no haya fuga de datos
+```
+
+Crea dos runs en el experimento `mibici-equipo43`: `p1-baseline-semana-previa` y
+`p1-gradient-boosting`. Las gráficas del análisis de error están en `reports/figures/p1_*`.
 
 ## P2: riesgo de que una estación se vacíe o se llene
 
@@ -199,6 +281,39 @@ además, la silhouette según el número de grupos.
   64 de ellas ya tienen perfil en prueba y el modelo les asigna un grupo (33 al 2, 20 al 1 y 11
   al 3): es lo que planeación urbana necesita para saber qué tipo de estaciones abrió.
 
+## Flujo de trabajo en Git
+
+Seguimos **GitHub Flow**:
+
+1. `master` siempre funciona; nadie hace commit directo a `master`.
+2. Cada cambio va en su propia rama, con un prefijo según el tipo: `feat/`, `fix/`, `docs/`,
+   `chore/` (por ejemplo, `feat/p2-riesgo-estaciones`).
+3. Los commits siguen [Conventional Commits](https://www.conventionalcommits.org/es/):
+   `tipo(alcance): descripción`, por ejemplo `feat(p3): registrar baseline geográfico y KMeans en MLflow`.
+4. La rama se integra a `master` con un **Pull Request** que revisa y aprueba otro integrante.
+5. Antes de integrar, la rama se actualiza con `master` y se resuelven los conflictos en la rama,
+   no en `master`.
+
+```powershell
+git switch master
+git pull
+git switch -c feat/mi-cambio
+# ... cambios ...
+git add <archivos>
+git commit -m "feat(p1): descripción corta"
+git push -u origin feat/mi-cambio
+gh pr create --base master --fill
+```
+
+## Integrantes
+
+| Integrante | GitHub | Contribución principal |
+|---|---|---|
+| Roberto | [@robertonali](https://github.com/robertonali) | Ingesta y versionado de datos (DVC), configuración del proyecto y P2 |
+| Manuel Medina | [@manuelMedinaMna](https://github.com/manuelMedinaMna) | ML Canvas y P1 |
+| Iñaki Medina | [@imedina-tec](https://github.com/imedina-tec) | Exploración y clustering de estaciones (P3) |
+| Fernando Mejía | [@ego-mejia](https://github.com/ego-mejia) | P3 en el pipeline (features, MLflow), descarga automática de datos, README y arquitectura |
+
 ## Project Organization
 
 ```
@@ -227,6 +342,8 @@ además, la silhouette según el número de grupos.
 ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
 │   └── figures        <- Generated graphics and figures to be used in reporting
 │
+├── tests              <- Pruebas con pytest (por ejemplo, que P1 no tenga fuga de datos)
+│
 ├── requirements.txt   <- Dependencias directas del proyecto (agregar a mano; no usar
 │                         `pip freeze`, ver sección "Cómo empezar")
 │
@@ -238,13 +355,16 @@ además, la silhouette según el número de grupos.
     │
     ├── dataset.py              <- Scripts to download or generate data
     │
-    ├── features.py             <- Code to create features for modeling
+    ├── features.py             <- Variables de P2 y P3 (`python -m mibici_mlops.features p2|p3`)
+    │
+    ├── features_p1.py          <- Variables de P1 (estación × día)
     │
     ├── modeling                
     │   ├── __init__.py 
     │   ├── predict.py          <- Code to run model inference with trained models          
     │   ├── registro.py         <- Experimento, etiquetas y versión de datos de MLflow (P1, P2, P3)
     │   ├── train.py            <- Code to train models
+    │   ├── train_p1.py         <- P1: baseline y gradient boosting registrados en MLflow
     │   ├── train_p2.py         <- P2: baselines registrados en MLflow
     │   └── train_p3.py         <- P3: baseline y KMeans registrados en MLflow
     │
