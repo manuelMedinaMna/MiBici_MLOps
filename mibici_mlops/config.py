@@ -22,6 +22,11 @@ MODELS_DIR = PROJ_ROOT / "models"
 VIAJES_PATH = INTERIM_DATA_DIR / "viajes.parquet"
 ESTACIONES_PATH = RAW_DATA_DIR / "estaciones" / "nomenclatura_2026_09.csv"
 P2_VENTANAS_PATH = PROCESSED_DATA_DIR / "p2_ventanas.parquet"
+P3_PERFILES_PATH = PROCESSED_DATA_DIR / "p3_perfiles.parquet"
+
+# Página de datos abiertos de donde dataset.py descarga los CSV que falten en data/raw.
+# Ver references/fuentes_datos.md.
+URL_DATOS_ABIERTOS = "https://mibici.net/es/datos-abiertos/"
 
 # Periodo de análisis: primer día con uso recuperado tras la pandemia.
 # Ver references/decisiones.md, decisión 2.
@@ -49,6 +54,14 @@ P2_VENTANA = "2h"
 P2_HORA_REINICIO = 4
 P2_INVENTARIO_INICIAL = 0.5
 P2_SEMANAS_HISTORIA = 4
+
+# P3: perfil de uso de cada estación y número de grupos. Ver references/decisiones_p3.md,
+# decisiones 2 (franjas), 3 (mínimo de viajes) y 5 (número de grupos).
+# Hora en que empieza cada franja del día; cada una dura hasta que empieza la siguiente.
+P3_FRANJAS = {"madrugada": 0, "manana": 6, "tarde": 12, "noche": 18}
+P3_MIN_VIAJES = 500
+P3_GRUPOS = 3
+P3_GRUPOS_BUSQUEDA = range(2, 9)
 
 REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
