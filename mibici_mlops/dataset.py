@@ -1,15 +1,20 @@
-"""Une y limpia los CSV mensuales de viajes de MiBici en un solo Parquet.
+"""Descarga, une y limpia los CSV mensuales de viajes de MiBici en un solo Parquet.
 
-Paso raw → interim: corrige las diferencias de formato entre archivos y los errores de los
-datos, como filas duplicadas (ver references/fuentes_datos.md). No filtra filas por criterios de
-análisis: esas decisiones, como el periodo a usar, van en features.py.
+Paso raw → interim: descarga de la página de datos abiertos los CSV que falten en data/raw (si
+se hizo `dvc pull`, no descarga nada), corrige las diferencias de formato entre archivos y los
+errores de los datos, como filas duplicadas (ver references/fuentes_datos.md). No filtra filas
+por criterios de análisis: esas decisiones, como el periodo a usar, van en features.py.
 
 Uso:
     python -m mibici_mlops.dataset
+    python -m mibici_mlops.dataset --sin-descargar   # solo usa los CSV que ya están en data/raw
 """
 
 from pathlib import Path
 import re
+import shutil
+from urllib.parse import urljoin
+from urllib.request import Request, urlopen
 
 from loguru import logger
 import pandas as pd
@@ -18,9 +23,25 @@ import pyarrow.parquet as pq
 from tqdm import tqdm
 import typer
 
-from mibici_mlops.config import INTERIM_DATA_DIR, RAW_DATA_DIR
+from mibici_mlops.config import (
+    ESTACIONES_PATH,
+    FECHA_FIN,
+    INTERIM_DATA_DIR,
+    RAW_DATA_DIR,
+    URL_DATOS_ABIERTOS,
+)
 
 app = typer.Typer()
+
+# El servidor responde 406 a las peticiones sin User-Agent de navegador.
+ENCABEZADOS = {"User-Agent": "Mozilla/5.0 (compatible; MiBici-MLOps/0.1)"}
+
+# Abril y mayo de 2023 ya no están en la página: se usan las copias de Internet Archive
+# (ver references/fuentes_datos.md, "Archivos recuperados de Internet Archive").
+RESPALDOS = {
+    "datos_abiertos_2023_04.csv": "https://web.archive.org/web/20261009131614id_/https://www.mibici.net/site/assets/files/46758/datos_abiertos_2023_04.csv",
+    "datos_abiertos_2023_05.csv": "https://web.archive.org/web/20240617215841id_/https://www.mibici.net/site/assets/files/46759/datos_abiertos_2023_05.csv",
+}
 
 # Se renombra por posición porque el encabezado de la columna 4 viene dañado en varios archivos.
 COLUMNAS = [
@@ -53,6 +74,59 @@ ESQUEMA = pa.schema(
 
 # Los nombres pueden traer sufijo (p. ej. datos_abiertos_2016_01-1.csv).
 PATRON_ARCHIVO = re.compile(r"datos_abiertos_(\d{4})_(\d{2})")
+
+
+def descargar(url: str, destino: Path) -> None:
+    """Descarga `url` en `destino`. Escribe primero un .part para no dejar archivos a medias."""
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    temporal = destino.with_suffix(".part")
+    with (
+        urlopen(Request(url, headers=ENCABEZADOS), timeout=300) as respuesta,
+        open(temporal, "wb") as archivo,
+    ):
+        shutil.copyfileobj(respuesta, archivo)
+    temporal.rename(destino)
+
+
+def enlaces_publicados(url: str = URL_DATOS_ABIERTOS) -> dict[str, str]:
+    """Nombre → URL de cada CSV enlazado en la página de datos abiertos, más los respaldos."""
+    with urlopen(Request(url, headers=ENCABEZADOS), timeout=60) as respuesta:
+        html = respuesta.read().decode("utf-8", errors="replace")
+    rutas = re.findall(r'href="([^"]+\.csv)"', html)
+    enlaces = {Path(ruta).name: urljoin(url, ruta) for ruta in rutas}
+    return {**RESPALDOS, **enlaces}
+
+
+def descargar_faltantes(viajes_dir: Path, estaciones_path: Path) -> None:
+    """Descarga la nomenclatura y los meses hasta FECHA_FIN que no estén en data/raw.
+
+    Los meses posteriores a FECHA_FIN no se descargan, para que los datos no cambien cuando
+    MiBici publique meses nuevos.
+    """
+    enlaces = enlaces_publicados()
+    ultimo_mes = pd.Timestamp(FECHA_FIN).strftime("%Y_%m")
+    pendientes = {}
+    if not estaciones_path.exists():
+        if estaciones_path.name not in enlaces:
+            raise FileNotFoundError(
+                f"{estaciones_path.name} ya no está publicado en {URL_DATOS_ABIERTOS}; "
+                "obtenerlo con `dvc pull`"
+            )
+        pendientes[estaciones_path] = enlaces[estaciones_path.name]
+    for nombre, url in enlaces.items():
+        coincidencia = PATRON_ARCHIVO.search(nombre)
+        if coincidencia is None or "_".join(coincidencia.groups()) > ultimo_mes:
+            continue
+        destino = viajes_dir / coincidencia.group(1) / nombre
+        if not destino.exists():
+            pendientes[destino] = url
+
+    if not pendientes:
+        logger.info("Todos los CSV ya están en data/raw; no se descarga nada")
+        return
+    logger.info(f"Descargando {len(pendientes)} archivos de {URL_DATOS_ABIERTOS}")
+    for destino, url in tqdm(pendientes.items(), desc="Descargas"):
+        descargar(url, destino)
 
 
 def listar_archivos(viajes_dir: Path) -> list[Path]:
@@ -144,10 +218,14 @@ def unir_estaciones(df: pd.DataFrame, estdf: pd.DataFrame) -> pd.DataFrame:
 
 @app.command()
 def main(
-    estaciones_path: Path = RAW_DATA_DIR / "estaciones/nomenclatura_2026_09.csv",
+    estaciones_path: Path = ESTACIONES_PATH,
     viajes_dir: Path = RAW_DATA_DIR / "viajes",
     output_path: Path = INTERIM_DATA_DIR / "viajes.parquet",
+    descargar_csv: bool = typer.Option(True, "--descargar/--sin-descargar"),
 ):
+    if descargar_csv:
+        descargar_faltantes(viajes_dir, estaciones_path)
+
     estaciones = pd.read_csv(estaciones_path)
     estaciones.set_index("id", inplace=True)
 
