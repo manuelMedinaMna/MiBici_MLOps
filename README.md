@@ -281,6 +281,10 @@ además, la silhouette según el número de grupos.
   64 de ellas ya tienen perfil en prueba y el modelo les asigna un grupo (33 al 2, 20 al 1 y 11
   al 3): es lo que planeación urbana necesita para saber qué tipo de estaciones abrió.
 
+Las capturas de MLflow están en `reports/figures/mlflow_p3_*.png`: lista de runs, detalle del
+run de KMeans (métricas, parámetros y etiquetas), el mapa de grupos como artefacto y la
+comparación contra el baseline.
+
 ## Flujo de trabajo en Git
 
 Seguimos **GitHub Flow**:
