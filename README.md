@@ -1,4 +1,4 @@
-# MiBici_MLOps
+# TC5061-Proyecto-Equipo43 (MiBici MLOps)
 
 <a target="_blank" href="https://cookiecutter-data-science.drivendata.org/">
     <img src="https://img.shields.io/badge/CCDS-Project%20template-328F97?logo=cookiecutter" />
@@ -74,8 +74,8 @@ agregue como *test user* de la app OAuth en Google Cloud; sin esto, `dvc pull` m
 blocked". Sin ese acceso, ver la nota debajo del bloque de comandos.
 
 ```powershell
-git clone https://github.com/robertonali/MiBici_MLOps.git
-cd MiBici_MLOps
+git clone https://github.com/robertonali/TC5061-Proyecto-Equipo43.git
+cd TC5061-Proyecto-Equipo43
 python -m venv .venv
 .venv\Scripts\activate
 python -m pip install -r requirements.txt
