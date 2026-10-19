@@ -5,7 +5,8 @@ se descartaron. Si una decisión cambia, no se borra: se marca como reemplazada 
 nueva.
 
 Aquí van las decisiones que afectan a todo el proyecto. Las de cada pregunta están en
-su propio archivo: [decisiones_p2.md](decisiones_p2.md) (P2).
+su propio archivo: [decisiones_p2.md](decisiones_p2.md) (P2) y
+[decisiones_p3.md](decisiones_p3.md) (P3).
 
 ## 1. Guardar los datos intermedios y procesados en Parquet, no en CSV
 
