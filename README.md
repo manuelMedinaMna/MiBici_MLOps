@@ -193,6 +193,9 @@ mlflow run . -e train -P pregunta=p1 -P hiperparametros=max_iter=200,max_leaf_no
 - **`--env-manager local`** usa el entorno virtual activado. Sin esa opción, MLflow crea un entorno
   nuevo con `python_env.yaml`, lo que requiere tener `pyenv` o `uv` instalado y tarda varios
   minutos la primera vez.
+- **Si rediriges la salida a un archivo** (`> log.txt`), define antes `$env:PYTHONUTF8 = "1"`.
+  Al terminar, `mlflow run` imprime un emoji que la codificación de Windows no acepta en un
+  archivo, y el comando marca error aunque el run haya terminado bien.
 - **P3 está pendiente.** `train` corre la versión actual de `train_p3.py`, que no coincide con la
   [sección de P3](#p3-grupos-de-estaciones-con-patrones-de-uso-parecidos): no usa `registro.py`
   (sus runs no llevan nombre ni etiquetas) ni separa entrenamiento y prueba. El equipo de P3 debe
