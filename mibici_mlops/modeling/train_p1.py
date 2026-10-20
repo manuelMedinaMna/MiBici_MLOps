@@ -3,11 +3,14 @@
 Compara el baseline (mismo día de la semana pasada) contra un gradient boosting. Los
 hiperparámetros se eligen con validación y la prueba se evalúa una sola vez, al final.
 
+Antes de correrlo, el servidor de MLflow debe estar levantado (ver la sección de MLflow del
+README):
+    mlflow server --backend-store-uri sqlite:///mlflow.db --port 5000
+
 Uso:
     python -m mibici_mlops.modeling.train_p1
 
-Para ver los runs:
-    mlflow ui --backend-store-uri sqlite:///mlflow.db
+Los runs se ven en http://127.0.0.1:5000.
 """
 
 from pathlib import Path
