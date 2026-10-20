@@ -1,18 +1,22 @@
 """Baselines de P2 registrados en MLflow.
 
 Lee la tabla de `features.py` (data/processed/p2_ventanas.parquet), la parte por fechas
-(decisión 6) y evalúa en el conjunto de prueba dos baselines (decisiones 3 y 7):
+(decisión 6) y evalúa en el conjunto de prueba uno de los dos baselines (decisiones 3 y 7):
 
-- clase mayoritaria (`DummyClassifier`), que siempre predice "sin riesgo";
-- frecuencia de cada clase en las últimas 4 semanas (misma estación, día de la semana y ventana).
+- `mayoritaria`: clase mayoritaria (`DummyClassifier`), que siempre predice "sin riesgo";
+- `frecuencia`: frecuencia de cada clase en las últimas 4 semanas (misma estación, día de la
+  semana y ventana).
 
-Cada baseline es un run del experimento EXPERIMENTO_MLFLOW con: las fechas, la versión de los
+Cada ejecución es un run del experimento EXPERIMENTO_MLFLOW con: las fechas, la versión de los
 datos, la semilla y los hiperparámetros como parámetros; recall, precisión y PR-AUC de cada clase
 de riesgo como métricas `test_*`; el equipo, la pregunta y el commit como etiquetas, y la curva
-precisión-recall como artefacto.
+precisión-recall como artefacto. El modelo y los hiperparámetros por defecto están en config.py
+(MODELOS["p2"]).
 
 Uso:
-    python -m mibici_mlops.modeling.train_p2
+    python -m mibici_mlops.modeling.train_p2                       # modelo por defecto
+    python -m mibici_mlops.modeling.train_p2 --modelo mayoritaria
+    mlflow run . -e train -P pregunta=p2 ...                       # lo mismo con el MLproject
 
 Antes de correrlo, el servidor de MLflow debe estar levantado (ver la sección de MLflow del
 README):
@@ -52,7 +56,12 @@ from mibici_mlops.config import (
     SEMILLA,
 )
 from mibici_mlops.features import CLASES_P2
-from mibici_mlops.modeling.registro import etiquetas_run, usar_experimento, version_datos
+from mibici_mlops.modeling.registro import (
+    etiquetas_run,
+    resolver_modelo,
+    usar_experimento,
+    version_datos,
+)
 
 app = typer.Typer()
 
@@ -76,14 +85,17 @@ def asignar_conjunto(dia: pd.Series) -> pd.Series:
     return conjunto
 
 
-def baseline_clase_mayoritaria(entrenamiento: pd.DataFrame, prueba: pd.DataFrame) -> pd.DataFrame:
-    """Probabilidad de cada clase con `DummyClassifier(strategy="most_frequent")`.
+def baseline_clase_mayoritaria(
+    entrenamiento: pd.DataFrame, prueba: pd.DataFrame, strategy: str
+) -> pd.DataFrame:
+    """Probabilidad de cada clase con `DummyClassifier(strategy=strategy)`.
 
-    Aprende la clase más común en entrenamiento ("sin riesgo") y la predice siempre. Es el piso:
-    no detecta ningún riesgo y aun así tiene exactitud alta, por eso la exactitud no sirve como
-    métrica. No usa variables: recibe una columna de ceros porque scikit-learn pide una matriz.
+    Con "most_frequent" (el de config.py) aprende la clase más común en entrenamiento ("sin
+    riesgo") y la predice siempre. Es el piso: no detecta ningún riesgo y aun así tiene exactitud
+    alta, por eso la exactitud no sirve como métrica. No usa variables: recibe una columna de
+    ceros porque scikit-learn pide una matriz.
     """
-    modelo = DummyClassifier(strategy="most_frequent", random_state=SEMILLA)
+    modelo = DummyClassifier(strategy=strategy, random_state=SEMILLA)
     modelo.fit(np.zeros((len(entrenamiento), 1)), entrenamiento["clase"])
     probabilidades = modelo.predict_proba(np.zeros((len(prueba), 1)))
     return pd.DataFrame(probabilidades, columns=modelo.classes_, index=prueba.index)[CLASES_P2]
@@ -200,8 +212,10 @@ def registrar_run(
     return metricas
 
 
-@app.command()
-def main(ventanas_path: Path = P2_VENTANAS_PATH):
+def entrenar(
+    modelo: str, hiperparametros: dict, ventanas_path: Path = P2_VENTANAS_PATH
+) -> dict[str, float]:
+    """Evalúa el baseline `modelo` con `hiperparametros` y lo registra como un run de MLflow."""
     tabla = pd.read_parquet(ventanas_path)
     tabla["conjunto"] = asignar_conjunto(tabla["dia"])
     entrenamiento = tabla[tabla["conjunto"] == "entrenamiento"]
@@ -225,29 +239,38 @@ def main(ventanas_path: Path = P2_VENTANAS_PATH):
 
     usar_experimento()
 
-    registrar_run(
-        "p2-baseline-clase-mayoritaria",
-        {"modelo": "DummyClassifier", "strategy": "most_frequent"},
-        prueba["clase"],
-        baseline_clase_mayoritaria(entrenamiento, prueba),
-        parametros,
-        etiquetas,
-    )
-    registrar_run(
-        f"p2-baseline-frecuencia-{P2_SEMANAS_HISTORIA}-semanas",
-        {
-            "modelo": "frecuencia_semanas_anteriores",
+    if modelo == "mayoritaria":
+        nombre = "p2-baseline-clase-mayoritaria"
+        params_modelo = {"estimador": "DummyClassifier", **hiperparametros}
+        probabilidades = baseline_clase_mayoritaria(entrenamiento, prueba, **hiperparametros)
+    else:
+        nombre = f"p2-baseline-frecuencia-{P2_SEMANAS_HISTORIA}-semanas"
+        params_modelo = {
+            "estimador": "frecuencia_semanas_anteriores",
             "semanas": P2_SEMANAS_HISTORIA,
             "desempate": " > ".join(CLASES_P2),
-        },
-        prueba["clase"],
-        baseline_frecuencia(prueba),
-        parametros,
-        etiquetas,
+        }
+        probabilidades = baseline_frecuencia(prueba)
+
+    metricas = registrar_run(
+        nombre, params_modelo, prueba["clase"], probabilidades, parametros, etiquetas
     )
     logger.success(
-        f"Runs registrados en el experimento {EXPERIMENTO_MLFLOW} ({MLFLOW_TRACKING_URI})"
+        f"Run {nombre} registrado en el experimento {EXPERIMENTO_MLFLOW} ({MLFLOW_TRACKING_URI})"
     )
+    return metricas
+
+
+@app.command()
+def main(
+    modelo: str = typer.Option("config", help="mayoritaria o frecuencia; config usa config.py."),
+    hiperparametros: str = typer.Option(
+        "config", help="clave=valor,clave=valor; config usa los de config.py."
+    ),
+    ventanas_path: Path = P2_VENTANAS_PATH,
+):
+    modelo, valores = resolver_modelo("p2", modelo, hiperparametros)
+    entrenar(modelo, valores, ventanas_path)
 
 
 if __name__ == "__main__":

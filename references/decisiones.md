@@ -5,7 +5,7 @@ se descartaron. Si una decisión cambia, no se borra: se marca como reemplazada 
 nueva.
 
 Aquí van las decisiones que afectan a todo el proyecto. Las de cada pregunta están en
-su propio archivo: [decisiones_p2.md](decisiones_p2.md) (P2) y
+su propio archivo: [decisiones_p1.md](decisiones_p1.md) (P1), [decisiones_p2.md](decisiones_p2.md) (P2) y
 [decisiones_p3.md](decisiones_p3.md) (P3).
 
 ## 1. Guardar los datos intermedios y procesados en Parquet, no en CSV
@@ -116,3 +116,38 @@ Usar los viajes **desde el 1 de marzo de 2022** hasta el último mes disponible.
 
 La decisión de plantear P2 como clasificación de 3 clases es ahora la decisión 1 de
 `decisiones_p2.md`.
+
+## 4. MLproject: entorno de requirements.txt, valores por defecto de config.py
+
+- **Fecha:** 2026-10-19
+- **Estado:** vigente
+- **Aplica a:** `MLproject`, `python_env.yaml`, `mibici_mlops/modeling/train.py` y los
+  `train_*.py`.
+
+### Decisión
+
+- `python_env.yaml` instala `requirements.txt` (`-r requirements.txt`) en lugar de copiar sus
+  versiones.
+- Puntos de entrada `ingest` (`dataset.py`), `features` (`features.py`) y `train`. `train` recibe
+  `pregunta`, `modelo` e `hiperparametros`, y `modeling/train.py` llama al script de la pregunta.
+- Los valores por defecto de `modelo` e `hiperparametros` son `config`: el modelo y los
+  hiperparámetros salen de `MODELO_POR_DEFECTO` y `MODELOS` en `config.py`. Las rutas, fechas y
+  semillas no aparecen en el `MLproject`.
+- Los hiperparámetros se escriben como `clave=valor,clave=valor`.
+
+### Por qué
+
+- **Una sola lista de versiones.** Si alguien actualiza `requirements.txt`, el `MLproject` usa las
+  mismas versiones sin tocarlo.
+- **Un solo lugar para los valores por defecto.** Un valor repetido en el `MLproject` y en
+  `config.py` terminaría siendo distinto en alguno de los dos.
+- **`clave=valor` no necesita comillas.** En Windows, `mlflow run` pasa el comando a `cmd`, que no
+  entiende las comillas simples que agrega MLflow; un JSON con comillas o espacios se rompería.
+
+### Consecuencias
+
+- `mlflow run` necesita `MLFLOW_TRACKING_URI` y `--experiment-name mibici-equipo43`; si falta
+  alguno, `registro.verificar_mlflow_run()` falla con la instrucción.
+- Para agregar un modelo a una pregunta: agregarlo a `MODELOS` y al `train_*.py` correspondiente.
+- **Pendiente:** P3. El `train_p3.py` actual no coincide con `decisiones_p3.md`; `train` lo corre
+  tal cual hasta que el equipo de P3 decida qué versión vale.

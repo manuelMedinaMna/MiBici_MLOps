@@ -88,6 +88,26 @@ P3_MIN_VIAJES = 500
 P3_GRUPOS = 3
 P3_GRUPOS_BUSQUEDA = range(2, 9)
 
+# Modelos que puede entrenar el punto de entrada `train` del MLproject, con sus hiperparámetros por
+# defecto. `mlflow run . -e train -P pregunta=p1` usa el modelo de MODELO_POR_DEFECTO y estos
+# hiperparámetros; `-P hiperparametros=clave=valor,...` cambia solo los que se indiquen.
+# P1: ver references/decisiones_p1.md, decisiones 5 y 7. P2: los dos baselines de la decisión 7
+# de decisiones_p2.md. P3: el KMeans de la versión actual de train_p3.py.
+MODELOS = {
+    "p1": {
+        "baseline": {},  # el mismo día de la semana pasada (lag_7d); no tiene hiperparámetros
+        "hgb": {"loss": "poisson", "learning_rate": 0.1, "max_iter": 300, "max_leaf_nodes": 63},
+    },
+    "p2": {
+        "mayoritaria": {"strategy": "most_frequent"},
+        "frecuencia": {},  # usa las columnas frec_* de features.py; no tiene hiperparámetros
+    },
+    "p3": {
+        "kmeans": {"n_clusters": P3_GRUPOS, "n_init": 10},
+    },
+}
+MODELO_POR_DEFECTO = {"p1": "hgb", "p2": "frecuencia", "p3": "kmeans"}
+
 REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 

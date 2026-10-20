@@ -1,14 +1,19 @@
-"""Entrena y evalúa P1 (demanda de viajes por estación y día) y lo registra en MLflow.
+"""Entrena y evalúa un modelo de P1 (demanda de viajes por estación y día) y lo registra en MLflow.
 
-Compara el baseline (mismo día de la semana pasada) contra un gradient boosting. Los
-hiperparámetros se eligen con validación y la prueba se evalúa una sola vez, al final.
+Cada ejecución entrena un solo modelo y crea un run: el baseline (mismo día de la semana pasada)
+o el gradient boosting (`hgb`) con los hiperparámetros indicados. El modelo y los hiperparámetros
+por defecto están en config.py (MODELOS["p1"]). Los hiperparámetros se comparan con las métricas
+de validación de cada run (decisión 7 de references/decisiones_p1.md).
 
 Antes de correrlo, el servidor de MLflow debe estar levantado (ver la sección de MLflow del
 README):
     mlflow server --backend-store-uri sqlite:///mlflow.db --artifacts-destination mlruns --port 5000 --workers 1
 
 Uso:
-    python -m mibici_mlops.modeling.train_p1
+    python -m mibici_mlops.modeling.train_p1                       # modelo por defecto (hgb)
+    python -m mibici_mlops.modeling.train_p1 --modelo baseline
+    python -m mibici_mlops.modeling.train_p1 --hiperparametros max_iter=200,max_leaf_nodes=31
+    mlflow run . -e train -P pregunta=p1 ...                       # lo mismo con el MLproject
 
 Los runs se ven en http://127.0.0.1:5000.
 """
@@ -36,17 +41,17 @@ from mibici_mlops.config import (
     SEMILLA,
 )
 from mibici_mlops.features import COLUMNAS_P1
-from mibici_mlops.modeling.registro import etiquetas_run, usar_experimento, version_datos
+from mibici_mlops.modeling.registro import (
+    etiquetas_run,
+    resolver_modelo,
+    usar_experimento,
+    version_datos,
+)
 
 app = typer.Typer()
 
-# Candidatos del gradient boosting. El conteo de viajes es no negativo, por lo que se prueba la
-# pérdida de Poisson además del error cuadrático.
-CANDIDATOS = [
-    {"loss": "poisson", "learning_rate": 0.1, "max_iter": 200, "max_leaf_nodes": 31},
-    {"loss": "poisson", "learning_rate": 0.1, "max_iter": 300, "max_leaf_nodes": 63},
-    {"loss": "squared_error", "learning_rate": 0.1, "max_iter": 200, "max_leaf_nodes": 31},
-]
+# Nombre del run de cada modelo en MLflow.
+NOMBRES_RUN = {"baseline": "p1-baseline-semana-previa", "hgb": "p1-gradient-boosting"}
 
 
 def metricas(real: pd.Series, prediccion: np.ndarray, prefijo: str) -> dict[str, float]:
@@ -94,12 +99,13 @@ def error_por_nivel_uso(
 
 
 def graficar(
+    modelo: str,
     prueba: pd.DataFrame,
     predicciones: dict[str, np.ndarray],
     por_dia: pd.DataFrame,
     por_nivel: pd.DataFrame,
 ) -> list[Path]:
-    """Genera las gráficas de P1 en reports/figures y regresa sus rutas."""
+    """Genera las gráficas del run en reports/figures (`p1_<modelo>_*`) y regresa sus rutas."""
     plt.switch_backend("Agg")
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     rutas = []
@@ -116,7 +122,7 @@ def graficar(
     ax.set(title="P1: viajes por día en prueba (suma de las estaciones)", ylabel="Viajes")
     ax.legend()
     fig.autofmt_xdate()
-    rutas.append(FIGURES_DIR / "p1_real_vs_predicho.png")
+    rutas.append(FIGURES_DIR / f"p1_{modelo}_real_vs_predicho.png")
     fig.savefig(rutas[-1], dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -127,7 +133,7 @@ def graficar(
     ax.set_xticks(range(7), DIAS)
     ax.set(title="P1: MAE por día de la semana (prueba)", ylabel="MAE (viajes)")
     ax.legend()
-    rutas.append(FIGURES_DIR / "p1_error_por_dia_semana.png")
+    rutas.append(FIGURES_DIR / f"p1_{modelo}_error_por_dia_semana.png")
     fig.savefig(rutas[-1], dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -140,7 +146,7 @@ def graficar(
     ax.set_xticks(posiciones + ancho * (len(predicciones) - 1) / 2, por_nivel["nivel_uso"])
     ax.set(title="P1: MAE por nivel de uso de la estación (prueba)", ylabel="MAE (viajes)")
     ax.legend()
-    rutas.append(FIGURES_DIR / "p1_error_por_nivel_uso.png")
+    rutas.append(FIGURES_DIR / f"p1_{modelo}_error_por_nivel_uso.png")
     fig.savefig(rutas[-1], dpi=150, bbox_inches="tight")
     plt.close(fig)
     return rutas
@@ -160,14 +166,14 @@ def parametros_comunes(datos: dict[str, pd.DataFrame]) -> dict[str, str | int]:
     }
 
 
-@app.command()
-def main(
+def entrenar(
+    modelo: str,
+    hiperparametros: dict,
     features_path: Path = P1_FEATURES_PATH,
     model_path: Path = P1_MODEL_PATH,
-    muestra_entrenamiento: float = typer.Option(
-        1.0, help="Fracción de filas de entrenamiento a usar (para pruebas rápidas)."
-    ),
-):
+    muestra_entrenamiento: float = 1.0,
+) -> dict[str, float]:
+    """Entrena `modelo` con `hiperparametros`, lo evalúa y lo registra como un run de MLflow."""
     tabla = pd.read_parquet(features_path)
     datos = {nombre: grupo for nombre, grupo in tabla.groupby("conjunto", observed=True)}
     for nombre in ("entrenamiento", "validacion", "prueba"):
@@ -183,64 +189,60 @@ def main(
 
     usar_experimento()
     etiquetas = etiquetas_run("P1", __file__)
-    comunes = parametros_comunes(datos)
 
-    # ---- Baseline: el mismo día de la semana pasada (lag_7d) ----
-    with mlflow.start_run(run_name="p1-baseline-semana-previa", tags=etiquetas):
-        mlflow.log_params({**comunes, "modelo": "naive_estacional_semana_previa"})
-        pred_base = {c: datos[c]["lag_7d"].to_numpy() for c in ("validacion", "prueba")}
-        resultados_base = {
-            **metricas(validacion["viajes"], pred_base["validacion"], "val"),
-            **metricas(prueba["viajes"], pred_base["prueba"], "test"),
-        }
-        mlflow.log_metrics(resultados_base)
-    logger.info(f"Baseline: {resultados_base}")
+    # El baseline siempre se calcula: es el modelo del run o la referencia de sus gráficas.
+    predicciones = {"baseline": prueba["lag_7d"].to_numpy()}
+    if modelo == "baseline":
+        pred_val = validacion["lag_7d"].to_numpy()
+        params_modelo = {"estimador": "naive_estacional_semana_previa"}
+        estimador = None
+    else:
+        estimador = HistGradientBoostingRegressor(
+            **hiperparametros, early_stopping=False, random_state=SEMILLA
+        ).fit(entrenamiento[COLUMNAS_P1], entrenamiento["viajes"])
+        pred_val = np.clip(estimador.predict(validacion[COLUMNAS_P1]), 0, None)
+        predicciones[modelo] = np.clip(estimador.predict(prueba[COLUMNAS_P1]), 0, None)
+        params_modelo = {"estimador": "HistGradientBoostingRegressor", **hiperparametros}
 
-    # ---- Candidato: gradient boosting, hiperparámetros elegidos con validación ----
-    x_entrenamiento = entrenamiento[COLUMNAS_P1]
-    mejor, busqueda = None, []
-    for params in CANDIDATOS:
-        modelo = HistGradientBoostingRegressor(
-            **params, early_stopping=False, random_state=SEMILLA
-        ).fit(x_entrenamiento, entrenamiento["viajes"])
-        pred_val = np.clip(modelo.predict(validacion[COLUMNAS_P1]), 0, None)
-        val = metricas(validacion["viajes"], pred_val, "val")
-        busqueda.append({**params, **val})
-        logger.info(f"{params} -> {val}")
-        if mejor is None or val["val_mae"] < mejor["val"]["val_mae"]:
-            mejor = {"modelo": modelo, "params": params, "val": val}
+    resultados = {
+        **metricas(validacion["viajes"], pred_val, "val"),
+        **metricas(prueba["viajes"], predicciones[modelo], "test"),
+    }
 
-    modelo = mejor["modelo"]
-    # La prueba se evalúa una sola vez, con el modelo ya elegido.
-    pred_prueba = np.clip(modelo.predict(prueba[COLUMNAS_P1]), 0, None)
-    resultados = {**mejor["val"], **metricas(prueba["viajes"], pred_prueba, "test")}
-
-    predicciones = {"baseline": pred_base["prueba"], "gradient_boosting": pred_prueba}
     por_dia = error_por_dia_semana(prueba, predicciones)
     por_nivel = error_por_nivel_uso(entrenamiento, prueba, predicciones)
-    figuras = graficar(prueba, predicciones, por_dia, por_nivel)
+    artefactos = graficar(modelo, prueba, predicciones, por_dia, por_nivel)
+    for nombre, df in {"error_por_dia_semana": por_dia, "error_por_nivel_uso": por_nivel}.items():
+        artefactos.append(FIGURES_DIR / f"p1_{modelo}_{nombre}.csv")
+        df.to_csv(artefactos[-1], index=False)
+    if estimador is not None:
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(estimador, model_path)
+        artefactos.append(model_path)
 
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    rutas_tablas = {
-        FIGURES_DIR / "p1_busqueda_hiperparametros.csv": pd.DataFrame(busqueda),
-        FIGURES_DIR / "p1_error_por_dia_semana.csv": por_dia,
-        FIGURES_DIR / "p1_error_por_nivel_uso.csv": por_nivel,
-    }
-    for ruta, df in rutas_tablas.items():
-        df.to_csv(ruta, index=False)
-
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(modelo, model_path)
-
-    with mlflow.start_run(run_name="p1-gradient-boosting", tags=etiquetas):
-        mlflow.log_params(
-            {**comunes, "modelo": "HistGradientBoostingRegressor", **mejor["params"]}
-        )
+    with mlflow.start_run(run_name=NOMBRES_RUN[modelo], tags=etiquetas):
+        mlflow.log_params({**parametros_comunes(datos), **params_modelo})
         mlflow.log_metrics(resultados)
-        for ruta in [*figuras, *rutas_tablas, model_path]:
+        for ruta in artefactos:
             mlflow.log_artifact(str(ruta))
-    logger.success(f"Gradient boosting: {resultados}")
-    logger.info(f"Baseline:          {resultados_base}")
+    logger.success(f"{NOMBRES_RUN[modelo]}: {resultados}")
+    return resultados
+
+
+@app.command()
+def main(
+    modelo: str = typer.Option("config", help="baseline o hgb; config usa el de config.py."),
+    hiperparametros: str = typer.Option(
+        "config", help="clave=valor,clave=valor; config usa los de config.py."
+    ),
+    features_path: Path = P1_FEATURES_PATH,
+    model_path: Path = P1_MODEL_PATH,
+    muestra_entrenamiento: float = typer.Option(
+        1.0, help="Fracción de filas de entrenamiento a usar (para pruebas rápidas)."
+    ),
+):
+    modelo, valores = resolver_modelo("p1", modelo, hiperparametros)
+    entrenar(modelo, valores, features_path, model_path, muestra_entrenamiento)
 
 
 if __name__ == "__main__":

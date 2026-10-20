@@ -149,6 +149,55 @@ Los runs se ven en http://127.0.0.1:5000. Para detener el servidor, `Ctrl+C` en 
 - Si el servidor no está corriendo, `train_p1` y `train_p2` fallan de inmediato con un mensaje
   que indica el comando para levantarlo.
 
+## MLproject: correr el flujo con `mlflow run`
+
+El archivo [`MLproject`](MLproject) define el proyecto para MLflow: su entorno
+([`python_env.yaml`](python_env.yaml), que instala `requirements.txt` con sus versiones fijas) y
+tres puntos de entrada:
+
+| Punto de entrada | Qué hace | Parámetros |
+|---|---|---|
+| `ingest` | Corre `dataset.py`: descarga los CSV que falten y los une en `data/interim/viajes.parquet` | — |
+| `features` | Corre `features.py` para una pregunta | `pregunta`: `p1`, `p2` o `p3` |
+| `train` | Entrena un modelo de una pregunta y lo registra como un run | `pregunta`; `modelo`; `hiperparametros` |
+
+Ningún punto de entrada repite rutas, fechas ni semillas: los scripts las toman de `config.py`. El
+valor `config` en `modelo` o `hiperparametros` también significa "el de `config.py`"
+(`MODELO_POR_DEFECTO` y `MODELOS`):
+
+| Pregunta | Modelos (el primero es el de por defecto) | Hiperparámetros que se pueden cambiar |
+|---|---|---|
+| `p1` | `hgb`, `baseline` | `hgb`: `loss`, `learning_rate`, `max_iter`, `max_leaf_nodes` |
+| `p2` | `frecuencia`, `mayoritaria` | `mayoritaria`: `strategy` |
+| `p3` | `kmeans` | `n_clusters`, `n_init` |
+
+Con el [servidor de MLflow](#mlflow-servidor-de-tracking-local) corriendo, en otra terminal:
+
+```powershell
+$env:MLFLOW_TRACKING_URI = "http://127.0.0.1:5000"   # una vez por terminal
+
+mlflow run . -e ingest --experiment-name mibici-equipo43 --env-manager local
+mlflow run . -e features -P pregunta=p1 --experiment-name mibici-equipo43 --env-manager local
+mlflow run . -e train -P pregunta=p1 --experiment-name mibici-equipo43 --env-manager local
+mlflow run . -e train -P pregunta=p1 -P modelo=baseline --experiment-name mibici-equipo43 --env-manager local
+mlflow run . -e train -P pregunta=p1 -P hiperparametros=max_iter=200,max_leaf_nodes=31 --experiment-name mibici-equipo43 --env-manager local
+```
+
+- **Cada `train` entrena un solo modelo y crea un solo run.** Para comparar hiperparámetros, corre
+  varias veces y compara las métricas de validación en http://127.0.0.1:5000.
+- **`hiperparametros` va como `clave=valor,clave=valor`, sin espacios ni comillas.** En Windows,
+  `mlflow run` pasa el comando a `cmd`, que no entiende las comillas que agrega MLflow.
+- **`MLFLOW_TRACKING_URI` y `--experiment-name` son necesarios.** `mlflow run` crea el run antes de
+  correr el script; sin ellos, el run quedaría fuera del servidor o en otro experimento. Si falta
+  alguno, el script falla con la instrucción para corregirlo.
+- **`--env-manager local`** usa el entorno virtual activado. Sin esa opción, MLflow crea un entorno
+  nuevo con `python_env.yaml`, lo que requiere tener `pyenv` o `uv` instalado y tarda varios
+  minutos la primera vez.
+- **P3 está pendiente.** `train` corre la versión actual de `train_p3.py`, que no coincide con la
+  [sección de P3](#p3-grupos-de-estaciones-con-patrones-de-uso-parecidos): no usa `registro.py`
+  (sus runs no llevan nombre ni etiquetas) ni separa entrenamiento y prueba. El equipo de P3 debe
+  decidir qué versión vale; después basta con ajustar `train_p3.py` y `MODELOS["p3"]`.
+
 ## P1: demanda de viajes por estación y día
 
 **Pregunta:** ¿cuántos viajes iniciarán en cada estación durante el día siguiente? La usa
@@ -172,7 +221,8 @@ Después de `python -m mibici_mlops.dataset`:
 
 ```powershell
 python -m mibici_mlops.features p1                  # variables por estación y día
-python -m mibici_mlops.modeling.train_p1            # baseline y gradient boosting en MLflow
+python -m mibici_mlops.modeling.train_p1 --modelo baseline   # baseline en MLflow
+python -m mibici_mlops.modeling.train_p1            # gradient boosting en MLflow
 pytest tests/test_features_p1.py                    # verifica que no haya fuga de datos
 ```
 
@@ -199,10 +249,12 @@ Configuración elegida con validación: pérdida de Poisson, `learning_rate` 0.1
 - El gradient boosting supera al baseline en las cuatro métricas, con una mejora de alrededor de una cuarta parte del error. Se cumple el criterio de despliegue de la propuesta (menor MAE y RMSE que el baseline en prueba).
 - Validación y prueba dan errores parecidos (el de prueba es un poco mayor, 5.99 contra 5.72), por lo que no hay señal fuerte de sobreajuste al periodo de validación. La prueba incluye septiembre de 2026, el mes con más uso de la serie.
 - El modelo gana todos los días de la semana. Su error es estable (entre 5.5 y 6.2 viajes), mientras que el del baseline varía más y es peor entre semana, sobre todo miércoles y viernes (8.6 y 9.0). El domingo es el día más fácil para ambos.
-- El RMSE es casi el doble del MAE, así que hay estaciones-día con errores grandes. El análisis por nivel de uso (`p1_error_por_nivel_uso.csv`) lo confirma: en las estaciones de uso alto (63 viajes al día en promedio) el MAE es de 11.0 viajes, contra 2.9 en las de uso bajo. En proporción a su demanda, el error es menor en las de uso alto (17 % contra 28 %).
+- El RMSE es casi el doble del MAE, así que hay estaciones-día con errores grandes. El análisis por nivel de uso (`p1_hgb_error_por_nivel_uso.csv`) lo confirma: en las estaciones de uso alto (63 viajes al día en promedio) el MAE es de 11.0 viajes, contra 2.9 en las de uso bajo. En proporción a su demanda, el error es menor en las de uso alto (17 % contra 28 %).
 
-Crea dos runs en el experimento `mibici-equipo43`: `p1-baseline-semana-previa` y
-`p1-gradient-boosting`. Las gráficas del análisis de error están en `reports/figures/p1_*`.
+Cada comando de entrenamiento crea un run en el experimento `mibici-equipo43`:
+`p1-baseline-semana-previa` o `p1-gradient-boosting`. Las gráficas y tablas del análisis de error
+de cada uno están en `reports/figures/p1_baseline_*` y `reports/figures/p1_hgb_*`; las del gradient
+boosting incluyen el baseline como referencia.
 
 ## P2: riesgo de que una estación se vacíe o se llene
 
@@ -231,13 +283,14 @@ Después de `python -m mibici_mlops.dataset`:
 
 ```powershell
 python -m mibici_mlops.features p2                  # etiqueta y variables (~35 s, ~3.6 GB de RAM)
-python -m mibici_mlops.modeling.train_p2            # baselines registrados en MLflow (~30 s)
+python -m mibici_mlops.modeling.train_p2 --modelo mayoritaria   # baseline de clase mayoritaria (~30 s)
+python -m mibici_mlops.modeling.train_p2            # baseline de frecuencia de 4 semanas (~30 s)
 ```
 
 | Comando | Resultado esperado |
 |---|---|
 | `features p2` | `6,979,284 ventanas de 471 estaciones` y clases `sin_riesgo: 81.39`, `se_vacia: 9.77`, `se_llena: 8.83` |
-| `train_p2` | Dos runs en el experimento `mibici-equipo43`: `p2-baseline-clase-mayoritaria` y `p2-baseline-frecuencia-4-semanas` |
+| `train_p2` | Un run por comando en el experimento `mibici-equipo43`: `p2-baseline-clase-mayoritaria` o `p2-baseline-frecuencia-4-semanas` |
 
 `train_p2` necesita el [servidor de MLflow](#mlflow-servidor-de-tracking-local) corriendo; los
 runs se ven en http://127.0.0.1:5000. Conviene correr `train_p2` con todo en commit: cada run
@@ -370,6 +423,7 @@ gh pr create --base master --fill
 
 ```
 ├── LICENSE            <- MIT (aplica al código; los datos son de MiBici)
+├── MLproject          <- Proyecto de MLflow: puntos de entrada ingest, features y train
 ├── Makefile           <- Makefile with convenience commands like `make data` or `make train`
 ├── README.md          <- The top-level README for developers using this project.
 ├── data
@@ -396,6 +450,8 @@ gh pr create --base master --fill
 │
 ├── tests              <- Pruebas con pytest (por ejemplo, que P1 no tenga fuga de datos)
 │
+├── python_env.yaml    <- Entorno del MLproject: Python 3.13 y requirements.txt
+│
 ├── requirements.txt   <- Dependencias directas del proyecto (agregar a mano; no usar
 │                         `pip freeze`, ver sección "Cómo empezar")
 │
@@ -412,10 +468,10 @@ gh pr create --base master --fill
     ├── modeling                
     │   ├── __init__.py 
     │   ├── predict.py          <- Code to run model inference with trained models          
-    │   ├── registro.py         <- Experimento, etiquetas y versión de datos de MLflow (P1, P2, P3)
-    │   ├── train.py            <- Code to train models
-    │   ├── train_p1.py         <- P1: baseline y gradient boosting registrados en MLflow
-    │   ├── train_p2.py         <- P2: baselines registrados en MLflow
+    │   ├── registro.py         <- Experimento, etiquetas, versión de datos y modelo a entrenar (P1, P2, P3)
+    │   ├── train.py            <- Punto de entrada `train` del MLproject: elige el script de la pregunta
+    │   ├── train_p1.py         <- P1: baseline o gradient boosting, un run por ejecución
+    │   ├── train_p2.py         <- P2: un baseline por ejecución
     │   └── train_p3.py         <- P3: baseline y KMeans registrados en MLflow
     │
     └── plots.py                <- Code to create visualizations

@@ -149,7 +149,7 @@ anteriores al corte. Es una regla que se puede evaluar al predecir.
 ## 5. Baseline y modelo candidato
 
 - **Fecha:** 2026-10-18
-- **Estado:** vigente
+- **Estado:** vigente; desde la decisión 7, cada configuración es un run aparte
 - **Aplica a:** `train_p1.py`.
 
 ### Decisión
@@ -226,3 +226,49 @@ los hiperparámetros se eligen con la validación y la prueba se evalúa una sol
 - Las variables de P1 no cambian: solo cambia la columna `conjunto`.
 - La prueba empieza un mes antes e incluye septiembre de 2026 (pendiente de la decisión 2 de
   `decisiones.md`).
+
+## 7. Un modelo por ejecución, con los hiperparámetros de config.py
+
+- **Fecha:** 2026-10-19
+- **Estado:** vigente; cambia cómo se hace la búsqueda de la decisión 5
+- **Aplica a:** `train_p1.py` y el punto de entrada `train` del `MLproject`.
+
+### Contexto
+
+El `MLproject` pide un punto de entrada `train` que reciba el modelo y sus hiperparámetros.
+Hasta ahora, `train_p1` corría en una sola ejecución el baseline y las tres configuraciones del
+gradient boosting, y registraba dos runs. `mlflow run` crea un run antes de correr el script, y
+el script solo puede escribir en ese run.
+
+### Decisión
+
+- Cada ejecución entrena **un modelo** (`baseline` o `hgb`) y crea **un run**.
+- El modelo y los hiperparámetros por defecto están en `config.py` (`MODELOS["p1"]`): el gradient
+  boosting con la configuración que ganó en validación (pérdida de Poisson, `learning_rate` 0.1,
+  `max_iter` 300 y `max_leaf_nodes` 63).
+- La búsqueda de la decisión 5 se repite corriendo una vez cada configuración y comparando
+  `val_mae` en MLflow:
+
+  ```powershell
+  mlflow run . -e train -P pregunta=p1 -P hiperparametros=max_iter=200,max_leaf_nodes=31 ...
+  mlflow run . -e train -P pregunta=p1 ...      # la de config.py (300 y 63)
+  mlflow run . -e train -P pregunta=p1 -P hiperparametros=loss=squared_error,max_iter=200,max_leaf_nodes=31 ...
+  ```
+
+### Por qué
+
+- **Cada run describe un solo modelo.** Sus parámetros y métricas no se mezclan con los de otros.
+- **Es lo que pide el `MLproject`.** El punto de entrada recibe el modelo y sus hiperparámetros.
+- **El resultado no cambia.** Con la configuración de `config.py`, el run da los mismos números
+  de la decisión 6 (`val_mae` 5.72, `test_mae` 5.99), y la configuración de 200 iteraciones y 31
+  hojas da `val_mae` 5.77, igual que en la búsqueda anterior.
+
+### Consecuencias
+
+- Cada run registra `test_mae` y `test_rmse`. La regla de la decisión 4 sigue vigente: se elige
+  con `val_*` y la prueba solo se reporta para la configuración elegida.
+- Desaparece `p1_busqueda_hiperparametros.csv`: la comparación está en MLflow.
+- Las gráficas y tablas llevan el modelo en el nombre (`p1_baseline_*` y `p1_hgb_*`). Las del
+  gradient boosting incluyen el baseline como referencia.
+- El parámetro con el nombre del estimador se llama `estimador` y no `modelo`, porque `mlflow run`
+  ya registra `modelo` con el valor que recibe (por ejemplo, `config`).

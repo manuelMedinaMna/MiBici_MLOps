@@ -1,0 +1,7 @@
+# Entorno del MLproject. Las versiones fijas están en requirements.txt (una sola lista para el
+# equipo y para MLflow); requirements.txt también instala el paquete mibici_mlops (-e .).
+python: "3.13.9"
+build_dependencies:
+  - pip
+dependencies:
+  - -r requirements.txt

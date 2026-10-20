@@ -1,0 +1,28 @@
+name: mibici-mlops
+
+# Mismas versiones que requirements.txt: python_env.yaml lo instala tal cual.
+python_env: python_env.yaml
+
+# Ningún punto de entrada repite rutas, fechas ni semillas: los scripts las toman de
+# mibici_mlops/config.py. "config" significa "el valor por defecto de config.py".
+# Antes de correrlos, levantar el servidor de MLflow (ver la sección del MLproject del README).
+entry_points:
+  # Descarga los CSV que falten y los une en data/interim/viajes.parquet.
+  ingest:
+    command: "python -m mibici_mlops.dataset"
+
+  # Tabla de variables de una pregunta en data/processed/.
+  features:
+    parameters:
+      pregunta: {type: string}
+    command: "python -m mibici_mlops.features {pregunta}"
+
+  # Entrena un modelo de una pregunta y lo registra como un run de MLflow.
+  train:
+    parameters:
+      pregunta: {type: string}
+      modelo: {type: string, default: config}
+      hiperparametros: {type: string, default: config}
+    command: >-
+      python -m mibici_mlops.modeling.train
+      --pregunta {pregunta} --modelo {modelo} --hiperparametros {hiperparametros}
