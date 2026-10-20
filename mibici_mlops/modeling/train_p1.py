@@ -5,7 +5,7 @@ hiperparámetros se eligen con validación y la prueba se evalúa una sola vez, 
 
 Antes de correrlo, el servidor de MLflow debe estar levantado (ver la sección de MLflow del
 README):
-    mlflow server --backend-store-uri sqlite:///mlflow.db --port 5000
+    mlflow server --backend-store-uri sqlite:///mlflow.db --artifacts-destination mlruns --port 5000 --workers 1
 
 Uso:
     python -m mibici_mlops.modeling.train_p1
