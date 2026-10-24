@@ -1,18 +1,22 @@
-"""Baselines de P2 registrados en MLflow.
+"""Modelos de P2 registrados en MLflow.
 
 Lee la tabla de `features.py` (data/processed/p2_ventanas.parquet), la parte por fechas
-(decisión 6) y evalúa en el conjunto de prueba dos baselines (decisiones 3 y 7):
+(decisión 6) y evalúa el modelo elegido con `--modelo` en los conjuntos de validación y prueba.
+Por ahora hay dos baselines (decisiones 3 y 7):
 
-- clase mayoritaria (`DummyClassifier`), que siempre predice "sin riesgo";
-- frecuencia de cada clase en las últimas 4 semanas (misma estación, día de la semana y ventana).
+- `mayoritaria`: clase mayoritaria (`DummyClassifier`), que siempre predice "sin riesgo";
+- `frecuencia`: frecuencia de cada clase en las últimas 4 semanas (misma estación, día de la
+  semana y ventana).
 
-Cada baseline es un run del experimento EXPERIMENTO_MLFLOW con: las fechas, la versión de los
+Cada llamada registra un run del experimento EXPERIMENTO_MLFLOW con: las fechas, la versión de los
 datos, la semilla y los hiperparámetros como parámetros; recall, precisión y PR-AUC de cada clase
-de riesgo como métricas `test_*`; el equipo, la pregunta y el commit como etiquetas, y la curva
-precisión-recall como artefacto.
+de riesgo como métricas `val_*` y `test_*`; el equipo, la pregunta, el commit, la familia del
+modelo (`model_family`) y la etapa del trabajo (`stage_of_work`) como etiquetas, y la curva
+precisión-recall de cada conjunto en `plots/`.
 
 Uso:
-    python -m mibici_mlops.modeling.train_p2
+    python -m mibici_mlops.modeling.train_p2 --modelo mayoritaria
+    python -m mibici_mlops.modeling.train_p2 --modelo frecuencia
 
 Antes de correrlo, el servidor de MLflow debe estar levantado (ver la sección de MLflow del
 README):
@@ -58,6 +62,8 @@ app = typer.Typer()
 
 CLASES_RIESGO = ["se_vacia", "se_llena"]
 NOMBRES = {"se_vacia": "Se vacía", "se_llena": "Se llena"}
+# Conjuntos en que se evalúa cada modelo: prefijo de sus métricas → nombre en las gráficas.
+NOMBRES_CONJUNTO = {"val": "validación", "test": "prueba"}
 
 # Colores de la gráfica: espacios 1 y 2 de la paleta categórica de referencia (validada para
 # daltonismo); el texto usa tinta neutra, nunca el color de la serie.
@@ -76,7 +82,9 @@ def asignar_conjunto(dia: pd.Series) -> pd.Series:
     return conjunto
 
 
-def baseline_clase_mayoritaria(entrenamiento: pd.DataFrame, prueba: pd.DataFrame) -> pd.DataFrame:
+def baseline_clase_mayoritaria(
+    entrenamiento: pd.DataFrame, evaluacion: pd.DataFrame
+) -> pd.DataFrame:
     """Probabilidad de cada clase con `DummyClassifier(strategy="most_frequent")`.
 
     Aprende la clase más común en entrenamiento ("sin riesgo") y la predice siempre. Es el piso:
@@ -85,17 +93,43 @@ def baseline_clase_mayoritaria(entrenamiento: pd.DataFrame, prueba: pd.DataFrame
     """
     modelo = DummyClassifier(strategy="most_frequent", random_state=SEMILLA)
     modelo.fit(np.zeros((len(entrenamiento), 1)), entrenamiento["clase"])
-    probabilidades = modelo.predict_proba(np.zeros((len(prueba), 1)))
-    return pd.DataFrame(probabilidades, columns=modelo.classes_, index=prueba.index)[CLASES_P2]
+    probabilidades = modelo.predict_proba(np.zeros((len(evaluacion), 1)))
+    return pd.DataFrame(probabilidades, columns=modelo.classes_, index=evaluacion.index)[CLASES_P2]
 
 
-def baseline_frecuencia(prueba: pd.DataFrame) -> pd.DataFrame:
+def baseline_frecuencia(entrenamiento: pd.DataFrame, evaluacion: pd.DataFrame) -> pd.DataFrame:
     """Probabilidad de cada clase: su frecuencia en las últimas P2_SEMANAS_HISTORIA semanas.
 
     No se entrena: usa las columnas `frec_*` de features.py, que solo miran semanas anteriores.
+    Recibe `entrenamiento` aunque no lo use, para que todos los modelos se llamen igual.
     """
     columnas = [f"frec_{clase}" for clase in CLASES_P2]
-    return prueba[columnas].set_axis(CLASES_P2, axis=1)
+    return evaluacion[columnas].set_axis(CLASES_P2, axis=1)
+
+
+# Modelos que se pueden correr con --modelo; cada llamada registra un run. Por modelo: nombre del
+# run, familia y etapa (etiquetas model_family y stage_of_work), hiperparámetros y la función que
+# da la probabilidad de cada clase a partir de (entrenamiento, conjunto a evaluar).
+MODELOS = {
+    "mayoritaria": {
+        "run": "p2-baseline-clase-mayoritaria",
+        "familia": "dummy",
+        "etapa": "baseline",
+        "hiperparametros": {"modelo": "DummyClassifier", "strategy": "most_frequent"},
+        "probabilidades": baseline_clase_mayoritaria,
+    },
+    "frecuencia": {
+        "run": f"p2-baseline-frecuencia-{P2_SEMANAS_HISTORIA}-semanas",
+        "familia": "heuristica",
+        "etapa": "baseline",
+        "hiperparametros": {
+            "modelo": "frecuencia_semanas_anteriores",
+            "semanas": P2_SEMANAS_HISTORIA,
+            "desempate": " > ".join(CLASES_P2),
+        },
+        "probabilidades": baseline_frecuencia,
+    },
+}
 
 
 def predecir(probabilidades: pd.DataFrame) -> pd.Series:
@@ -104,8 +138,10 @@ def predecir(probabilidades: pd.DataFrame) -> pd.Series:
     return pd.Series(np.array(CLASES_P2)[indice], index=probabilidades.index)
 
 
-def calcular_metricas(clase: pd.Series, probabilidades: pd.DataFrame) -> dict[str, float]:
-    """Recall, precisión y PR-AUC de cada clase de riesgo, con el prefijo del conjunto (test_).
+def calcular_metricas(
+    clase: pd.Series, probabilidades: pd.DataFrame, prefijo: str
+) -> dict[str, float]:
+    """Recall, precisión y PR-AUC de cada clase de riesgo, con el prefijo del conjunto (val, test).
 
     También registra la proporción de cada clase: es la PR-AUC que tendría un modelo al azar, y
     sirve para leer las demás métricas.
@@ -115,10 +151,14 @@ def calcular_metricas(clase: pd.Series, probabilidades: pd.DataFrame) -> dict[st
     for riesgo in CLASES_RIESGO:
         real = clase == riesgo
         predicha = prediccion == riesgo
-        metricas[f"test_recall_{riesgo}"] = recall_score(real, predicha)
-        metricas[f"test_precision_{riesgo}"] = precision_score(real, predicha, zero_division=0)
-        metricas[f"test_pr_auc_{riesgo}"] = average_precision_score(real, probabilidades[riesgo])
-        metricas[f"test_proporcion_{riesgo}"] = real.mean()
+        metricas[f"{prefijo}_recall_{riesgo}"] = recall_score(real, predicha)
+        metricas[f"{prefijo}_precision_{riesgo}"] = precision_score(
+            real, predicha, zero_division=0
+        )
+        metricas[f"{prefijo}_pr_auc_{riesgo}"] = average_precision_score(
+            real, probabilidades[riesgo]
+        )
+        metricas[f"{prefijo}_proporcion_{riesgo}"] = real.mean()
     return metricas
 
 
@@ -179,18 +219,28 @@ def graficar_curvas_pr(clase: pd.Series, probabilidades: pd.DataFrame, titulo: s
 def registrar_run(
     nombre: str,
     hiperparametros: dict,
-    clase: pd.Series,
-    probabilidades: pd.DataFrame,
+    conjuntos: dict[str, pd.DataFrame],
+    probabilidades: dict[str, pd.DataFrame],
     parametros: dict,
     etiquetas: dict,
 ) -> dict[str, float]:
-    """Registra un baseline como un run de MLflow: parámetros, etiquetas, métricas y la gráfica."""
+    """Registra un modelo como un run de MLflow: parámetros, etiquetas, métricas y gráficas.
+
+    `conjuntos` y `probabilidades` van por prefijo (val, test): cada conjunto da sus métricas y
+    su curva precisión-recall en plots/.
+    """
+    metricas = {}
     with mlflow.start_run(run_name=nombre, tags=etiquetas):
         mlflow.log_params({**parametros, **hiperparametros})
-        metricas = calcular_metricas(clase, probabilidades)
+        for prefijo, datos in conjuntos.items():
+            metricas.update(calcular_metricas(datos["clase"], probabilidades[prefijo], prefijo))
+            figura = graficar_curvas_pr(
+                datos["clase"],
+                probabilidades[prefijo],
+                f"P2 · {nombre} (conjunto de {NOMBRES_CONJUNTO[prefijo]})",
+            )
+            mlflow.log_figure(figura, f"plots/curva_precision_recall_{prefijo}.png")
         mlflow.log_metrics(metricas)
-        figura = graficar_curvas_pr(clase, probabilidades, f"P2 · {nombre} (conjunto de prueba)")
-        mlflow.log_figure(figura, "curva_precision_recall.png")
     resumen = {
         metrica: round(valor, 3)
         for metrica, valor in metricas.items()
@@ -201,14 +251,31 @@ def registrar_run(
 
 
 @app.command()
-def main(ventanas_path: Path = P2_VENTANAS_PATH):
+def main(
+    modelo: str = typer.Option(..., help=f"Modelo a correr: {', '.join(MODELOS)}."),
+    ventanas_path: Path = P2_VENTANAS_PATH,
+):
+    if modelo not in MODELOS:
+        raise typer.BadParameter(f"usa uno de: {', '.join(MODELOS)}", param_hint="--modelo")
+    elegido = MODELOS[modelo]
+
     tabla = pd.read_parquet(ventanas_path)
     tabla["conjunto"] = asignar_conjunto(tabla["dia"])
     entrenamiento = tabla[tabla["conjunto"] == "entrenamiento"]
-    prueba = tabla[tabla["conjunto"] == "prueba"]
-    logger.info(f"Ventanas: {len(entrenamiento):,} de entrenamiento y {len(prueba):,} de prueba")
+    conjuntos = {
+        "val": tabla[tabla["conjunto"] == "validacion"],
+        "test": tabla[tabla["conjunto"] == "prueba"],
+    }
+    logger.info(
+        f"Ventanas: {len(entrenamiento):,} de entrenamiento, {len(conjuntos['val']):,} de "
+        f"validación y {len(conjuntos['test']):,} de prueba"
+    )
 
-    etiquetas = etiquetas_run("P2", __file__)
+    etiquetas = {
+        **etiquetas_run("P2", __file__),
+        "model_family": elegido["familia"],
+        "stage_of_work": elegido["etapa"],
+    }
     parametros = {
         "fecha_inicio": FECHA_INICIO,
         "fecha_fin": FECHA_FIN,
@@ -220,33 +287,27 @@ def main(ventanas_path: Path = P2_VENTANAS_PATH):
         "hora_reinicio": P2_HORA_REINICIO,
         "inventario_inicial": P2_INVENTARIO_INICIAL,
         "ventanas_entrenamiento": len(entrenamiento),
-        "ventanas_prueba": len(prueba),
+        "ventanas_validacion": len(conjuntos["val"]),
+        "ventanas_prueba": len(conjuntos["test"]),
     }
 
     usar_experimento()
 
+    probabilidades = {
+        prefijo: elegido["probabilidades"](entrenamiento, datos)
+        for prefijo, datos in conjuntos.items()
+    }
     registrar_run(
-        "p2-baseline-clase-mayoritaria",
-        {"modelo": "DummyClassifier", "strategy": "most_frequent"},
-        prueba["clase"],
-        baseline_clase_mayoritaria(entrenamiento, prueba),
-        parametros,
-        etiquetas,
-    )
-    registrar_run(
-        f"p2-baseline-frecuencia-{P2_SEMANAS_HISTORIA}-semanas",
-        {
-            "modelo": "frecuencia_semanas_anteriores",
-            "semanas": P2_SEMANAS_HISTORIA,
-            "desempate": " > ".join(CLASES_P2),
-        },
-        prueba["clase"],
-        baseline_frecuencia(prueba),
+        elegido["run"],
+        elegido["hiperparametros"],
+        conjuntos,
+        probabilidades,
         parametros,
         etiquetas,
     )
     logger.success(
-        f"Runs registrados en el experimento {EXPERIMENTO_MLFLOW} ({MLFLOW_TRACKING_URI})"
+        f"Run {elegido['run']} registrado en el experimento {EXPERIMENTO_MLFLOW} "
+        f"({MLFLOW_TRACKING_URI})"
     )
 
 
