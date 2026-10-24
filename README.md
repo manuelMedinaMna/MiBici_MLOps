@@ -24,7 +24,7 @@ flowchart LR
     subgraph repo["Repositorio (GitHub)"]
         config["config.py<br/>rutas, fechas, semilla,<br/>experimento MLflow"]
         dataset["dataset.py<br/>descarga, limpieza<br/>y unión"]
-        feat["features.py (P2, P3)<br/>features_p1.py (P1)"]
+        feat["features.py<br/>P1, P2 y P3"]
         train["modeling/<br/>train_p1.py · train_p2.py · train_p3.py"]
         registro["modeling/registro.py<br/>etiquetas, commit y<br/>versión de datos"]
     end
@@ -46,9 +46,10 @@ flowchart LR
     registro --> train
     config -.-> dataset & feat & train
 
-    train -->|"parámetros, métricas,<br/>etiquetas y artefactos"| mlflow[("MLflow<br/>mlflow.db + mlruns/")]
+    train -->|"parámetros, métricas,<br/>etiquetas y artefactos"| server["mlflow server<br/>127.0.0.1:5000"]
+    server --> mlflow[("mlflow.db + mlruns/")]
     train --> models[("models/")]
-    mlflow --> ui["mlflow ui<br/>comparar runs"]
+    server --> ui["interfaz web<br/>comparar runs"]
 ```
 
 - **Datos:** los CSV crudos se versionan con DVC en el Drive del equipo; `dataset.py` también
@@ -125,6 +126,29 @@ dvc push        # si falla con WinError 10054: dvc push -j 2
 git push
 ```
 
+## MLflow: servidor de tracking local
+
+Los scripts `train_*.py` mandan sus runs a un servidor de MLflow que corre en tu computadora. El
+servidor guarda parámetros, métricas, etiquetas y modelos registrados en `mlflow.db` (SQLite), el
+almacenamiento con base de datos que requiere el Model Registry, y los artefactos en `mlruns/`.
+Ninguno de los dos se sube a Git: cada integrante tiene su propio historial.
+
+Antes de entrenar, levanta el servidor en una terminal aparte, desde la raíz del proyecto y con el
+entorno virtual activado, y déjalo corriendo:
+
+```powershell
+mlflow server --backend-store-uri sqlite:///mlflow.db --artifacts-destination mlruns --port 5000 --workers 1
+```
+
+Los runs se ven en http://127.0.0.1:5000. Para detener el servidor, `Ctrl+C` en esa terminal.
+
+- Los scripts se conectan a `http://127.0.0.1:5000` (`MLFLOW_TRACKING_URI` en `config.py`). Para
+  usar otro servidor, define `MLFLOW_TRACKING_URI` en un archivo `.env` en la raíz del proyecto.
+- `--workers 1` levanta un solo proceso. Con los 4 que usa por defecto, en Windows algunos fallan
+  con `WinError 10022` porque no pueden compartir el puerto.
+- Si el servidor no está corriendo, `train_p1` y `train_p2` fallan de inmediato con un mensaje
+  que indica el comando para levantarlo.
+
 ## P1: demanda de viajes por estación y día
 
 **Pregunta:** ¿cuántos viajes iniciarán en cada estación durante el día siguiente? La usa
@@ -147,35 +171,35 @@ Las decisiones y su justificación están en
 Después de `python -m mibici_mlops.dataset`:
 
 ```powershell
-python -m mibici_mlops.features_p1                  # variables por estación y día
+python -m mibici_mlops.features p1                  # variables por estación y día
 python -m mibici_mlops.modeling.train_p1            # baseline y gradient boosting en MLflow
 pytest tests/test_features_p1.py                    # verifica que no haya fuga de datos
 ```
 
-**Datos y partición temporal** (marzo de 2022 a septiembre de 2026, con 468,138 filas estación-día para entrenamiento, 44,131 para validación y 64,879 para prueba):
+**Datos y partición temporal** (marzo de 2022 a septiembre de 2026, con 434,345 filas estación-día para entrenamiento, 66,890 para validación y 75,913 para prueba). Se usa la partición común de `config.py`, igual que P2 y P3:
 
 | Conjunto | Periodo |
 |---|---|
-| Entrenamiento | hasta 2025-12-31 |
-| Validación | 2026-01-01 a 2026-04-30 |
-| Prueba | 2026-05-01 a 2026-09-30 |
+| Entrenamiento | hasta 2025-09-30 |
+| Validación | 2025-10-01 a 2026-03-31 |
+| Prueba | 2026-04-01 a 2026-09-30 |
 
 **Resultados** (MAE y RMSE en viajes por estación y día; menor es mejor):
 
 | Modelo | val_mae | val_rmse | test_mae | test_rmse |
 |---|---|---|---|---|
-| Baseline: mismo día de la semana pasada | 8.39 | 15.98 | 7.85 | 15.22 |
-| Gradient boosting (`HistGradientBoostingRegressor`) | 6.10 | 11.65 | 5.97 | 11.47 |
-| Mejora frente al baseline | 27 % | 27 % | 24 % | 25 % |
+| Baseline: mismo día de la semana pasada | 7.78 | 14.12 | 7.94 | 15.41 |
+| Gradient boosting (`HistGradientBoostingRegressor`) | 5.72 | 10.37 | 5.99 | 11.52 |
+| Mejora frente al baseline | 26 % | 27 % | 25 % | 25 % |
 
-Configuración elegida con validación: pérdida de Poisson, `learning_rate` 0.1, `max_iter` 300 y `max_leaf_nodes` 63 (semilla 42). Los runs están en MLflow como `p1-baseline-semana-previa` y `p1-gradient-boosting`, y las gráficas en `reports/figures/p1_*`.
+Configuración elegida con validación: pérdida de Poisson, `learning_rate` 0.1, `max_iter` 300 y `max_leaf_nodes` 63 (semilla 43). Los runs están en MLflow como `p1-baseline-semana-previa` y `p1-gradient-boosting`, y las gráficas en `reports/figures/p1_*`.
 
 **Interpretación**
 
 - El gradient boosting supera al baseline en las cuatro métricas, con una mejora de alrededor de una cuarta parte del error. Se cumple el criterio de despliegue de la propuesta (menor MAE y RMSE que el baseline en prueba).
-- Validación y prueba dan errores parecidos (el de prueba incluso es un poco menor), por lo que no hay señal de sobreajuste al periodo de validación.
-- El modelo gana todos los días de la semana. Su error es estable (entre 5.5 y 6.2 viajes), mientras que el del baseline varía más y es peor entre semana, sobre todo miércoles y viernes (cerca de 8.5 a 8.8). El domingo es el día más fácil para ambos.
-- El RMSE es casi el doble del MAE, así que hay estaciones-día con errores grandes, probablemente en estaciones de mucho uso, feriados o eventos. Falta confirmarlo con el análisis por nivel de uso (`p1_error_por_nivel_uso.csv`).
+- Validación y prueba dan errores parecidos (el de prueba es un poco mayor, 5.99 contra 5.72), por lo que no hay señal fuerte de sobreajuste al periodo de validación. La prueba incluye septiembre de 2026, el mes con más uso de la serie.
+- El modelo gana todos los días de la semana. Su error es estable (entre 5.5 y 6.2 viajes), mientras que el del baseline varía más y es peor entre semana, sobre todo miércoles y viernes (8.6 y 9.0). El domingo es el día más fácil para ambos.
+- El RMSE es casi el doble del MAE, así que hay estaciones-día con errores grandes. El análisis por nivel de uso (`p1_error_por_nivel_uso.csv`) lo confirma: en las estaciones de uso alto (63 viajes al día en promedio) el MAE es de 11.0 viajes, contra 2.9 en las de uso bajo. En proporción a su demanda, el error es menor en las de uso alto (17 % contra 28 %).
 
 Crea dos runs en el experimento `mibici-equipo43`: `p1-baseline-semana-previa` y
 `p1-gradient-boosting`. Las gráficas del análisis de error están en `reports/figures/p1_*`.
@@ -208,7 +232,6 @@ Después de `python -m mibici_mlops.dataset`:
 ```powershell
 python -m mibici_mlops.features p2                  # etiqueta y variables (~35 s, ~3.6 GB de RAM)
 python -m mibici_mlops.modeling.train_p2            # baselines registrados en MLflow (~30 s)
-mlflow ui --backend-store-uri sqlite:///mlflow.db   # ver los runs en http://127.0.0.1:5000
 ```
 
 | Comando | Resultado esperado |
@@ -216,8 +239,9 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db   # ver los runs en http://127
 | `features p2` | `6,979,284 ventanas de 471 estaciones` y clases `sin_riesgo: 81.39`, `se_vacia: 9.77`, `se_llena: 8.83` |
 | `train_p2` | Dos runs en el experimento `mibici-equipo43`: `p2-baseline-clase-mayoritaria` y `p2-baseline-frecuencia-4-semanas` |
 
-Los runs se guardan en `mlflow.db` y `mlruns/`, que no se suben a Git. Conviene correr `train_p2`
-con todo en commit: cada run registra el commit y si había cambios sin commit.
+`train_p2` necesita el [servidor de MLflow](#mlflow-servidor-de-tracking-local) corriendo; los
+runs se ven en http://127.0.0.1:5000. Conviene correr `train_p2` con todo en commit: cada run
+registra el commit y si había cambios sin commit.
 
 ### Resultados de los baselines (conjunto de prueba)
 
@@ -261,12 +285,11 @@ Las decisiones y su justificación están en
 
 ### Cómo correrlo
 
-Después de `python -m mibici_mlops.dataset`:
+Después de `python -m mibici_mlops.dataset` y con el [servidor de MLflow](#mlflow-servidor-de-tracking-local) corriendo:
 
 ```powershell
 python -m mibici_mlops.features p3                  # perfil de cada estación (~5 s, ~3 GB de RAM)
 python -m mibici_mlops.modeling.train_p3            # baseline y KMeans registrados en MLflow (~30 s)
-mlflow ui --backend-store-uri sqlite:///mlflow.db   # ver los runs en http://127.0.0.1:5000
 ```
 
 | Comando | Resultado esperado |
@@ -384,9 +407,7 @@ gh pr create --base master --fill
     │
     ├── dataset.py              <- Scripts to download or generate data
     │
-    ├── features.py             <- Variables de P2 y P3 (`python -m mibici_mlops.features p2|p3`)
-    │
-    ├── features_p1.py          <- Variables de P1 (estación × día)
+    ├── features.py             <- Variables de P1, P2 y P3 (`python -m mibici_mlops.features p1|p2|p3`)
     │
     ├── modeling                
     │   ├── __init__.py 
