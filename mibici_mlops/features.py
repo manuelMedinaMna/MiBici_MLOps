@@ -8,8 +8,8 @@ con el número de viajes que inician ahí, variables de calendario y de la estac
 de los días anteriores. Las reglas están en references/decisiones_p1.md.
 
 P2 (riesgo de que una estación se vacíe o se llene): una fila por estación y ventana de 2 horas,
-con la etiqueta y la frecuencia de cada clase en las semanas anteriores. Las reglas están en
-references/decisiones_p2.md y el análisis, en las secciones 12 y 13 de
+con la etiqueta, variables de calendario y la frecuencia de cada clase en las semanas anteriores.
+Las reglas están en references/decisiones_p2.md y el análisis, en las secciones 12 y 13 de
 notebooks/2.0-rc-p2-tamano-ventana.ipynb.
 
 P3 (grupos de estaciones con patrones de uso parecidos): una fila por estación y conjunto
@@ -60,6 +60,9 @@ COLUMNAS_P2 = [
     "estacion",
     "ventana",
     "dia",
+    "hora",
+    "dia_semana",
+    "feriado",
     "capacidad",
     "clase",
     "frec_se_vacia",
@@ -220,6 +223,29 @@ def frecuencia_semanas_anteriores(
     return frecuencias
 
 
+def variables_calendario(ventanas: pd.DataFrame) -> pd.DataFrame:
+    """Hora en que empieza la ventana, día de la semana (0 = lunes) y si es día feriado.
+
+    Se calculan con la fecha y hora de la ventana, igual que `frecuencia_semanas_anteriores`. Los
+    feriados son los de `es_feriado`, la misma lista que usa P1.
+
+    Por qué para P2: el riesgo se concentra en las horas pico de los días hábiles (decisión 2). En
+    los feriados que caen entre semana, de 6 a 22 h solo el 6% de las ventanas está en riesgo,
+    contra el 24% de un día hábil, y su perfil por hora se parece al de un fin de semana; la
+    frecuencia de las semanas anteriores no lo sabe, porque compara con el mismo día de la semana.
+    Las tres se conocen antes del momento de la predicción (4:00): no usan información del futuro.
+    """
+    momentos = ventanas["ventana"]
+    return pd.DataFrame(
+        {
+            "hora": momentos.dt.hour,
+            "dia_semana": momentos.dt.dayofweek,
+            "feriado": es_feriado(pd.DatetimeIndex(momentos)),
+        },
+        index=ventanas.index,
+    )
+
+
 # Con un callback, cada pregunta es un subcomando (`features p2`) y P1 o P3 pueden agregar el suyo.
 @app.callback()
 def main():
@@ -233,7 +259,7 @@ def p2(
     output_path: Path = P2_VENTANAS_PATH,
     grupos: int = 8,
 ):
-    """P2: etiqueta de riesgo y frecuencia de cada clase por estación y ventana de 2 horas."""
+    """P2: etiqueta de riesgo, calendario y frecuencia de cada clase por estación y ventana."""
     if pd.Timedelta(hours=P2_HORA_REINICIO) % pd.Timedelta(P2_VENTANA):
         raise ValueError("P2_HORA_REINICIO debe coincidir con el inicio de una ventana")
 
@@ -258,6 +284,7 @@ def p2(
         ventanas = completar_ventanas(resumir_ventanas(movimientos), capacidad)
         ventanas["clase"] = etiquetar(ventanas)
         ventanas = ventanas.join(frecuencia_semanas_anteriores(ventanas))
+        ventanas = ventanas.join(variables_calendario(ventanas))
         partes.append(ventanas[COLUMNAS_P2])
 
     tabla = pd.concat(partes, ignore_index=True)
