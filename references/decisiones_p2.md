@@ -47,7 +47,9 @@ riesgo, que es justo lo que el equipo de rebalanceo necesita para actuar.
   pesos de clase (`class_weight`) en los modelos.
 - El baseline de clase mayoritaria tendrá recall de 0 en las clases de riesgo; sirve como
   piso, no como referencia útil.
-- Hay que actualizar la sección de P2 del ML Canvas (`references/MLCanvas_MiBici.pdf`).
+- La sección de P2 del ML Canvas (`references/MLCanvas_MiBici.pdf`) se actualizó en la
+  iteración 2 (2026-10-18): 3 clases por ventana de 2 horas, los dos baselines y la frecuencia
+  de las 4 semanas anteriores como variable.
 - El umbral que define "se vacía" y "se llena" está en la decisión 5.
 
 ## 2. Predecir el riesgo en ventanas de 2 horas
