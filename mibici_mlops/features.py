@@ -48,6 +48,7 @@ from mibici_mlops.config import (
     P3_PERFILES_PATH,
     VIAJES_PATH,
 )
+from mibici_mlops.modeling.registro import etiquetar_run_de_proyecto
 
 app = typer.Typer()
 
@@ -248,8 +249,10 @@ def variables_calendario(ventanas: pd.DataFrame) -> pd.DataFrame:
 
 # Con un callback, cada pregunta es un subcomando (`features p2`) y P1 o P3 pueden agregar el suyo.
 @app.callback()
-def main():
+def main(ctx: typer.Context):
     """Construye las tablas de variables y etiquetas en data/processed."""
+    # Con `mlflow run . -e features -P question=p2`, etiqueta el run que creó MLflow.
+    etiquetar_run_de_proyecto(str(ctx.invoked_subcommand).upper(), __file__, "features")
 
 
 @app.command()
