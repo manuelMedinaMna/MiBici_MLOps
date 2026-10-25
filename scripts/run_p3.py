@@ -1,31 +1,33 @@
-import subprocess
-import logging
-import sys
+"""Ejecuta la generación de perfiles, el entrenamiento y las gráficas de P3."""
 
-def run_step(module_name):
-    """Ejecuta un módulo de Python como subprocess y maneja errores."""
-    print(f"\n[PIPELINE] Ejecutando: python -m {module_name}")
-    result = subprocess.run([sys.executable, "-m", module_name])
-    
-    if result.returncode != 0:
-        print(f"\n[ERROR] El paso '{module_name}' falló con código de salida {result.returncode}.")
-        sys.exit(result.returncode)
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from mibici_mlops.dataset import main as preparar_datos
+from mibici_mlops.features import p3 as generar_perfiles
+from mibici_mlops.modeling.train_p3 import p3train as entrenar
+from mibici_mlops.plots import p3 as generar_plots
+
 
 def main():
-    # Lista de módulos en orden secuencial para el clustering
-    steps = [
-        "mibici_mlops.dataset",
-        "mibici_mlops.features_p3",
-        "mibici_mlops.modeling.train_p3",
-        "mibici_mlops.plots"
-    ]
-    
-    logging.info("=== INICIANDO PROCESO DE CLUSTERIZACIÓN ===")
-    
-    for step in steps:
-        run_step(step)
-        
-    logging.info("=== ¡PROCESO DE CLUSTERIZACIÓN COMPLETADO EXITOSAMENTE! ===")
+    print("\n[PIPELINE] Preparando data/interim/viajes.parquet")
+    preparar_datos()
+
+    print("\n[PIPELINE] Generando perfiles P3")
+    generar_perfiles()
+
+    print("\n[PIPELINE] Entrenando el modelo P3")
+    run_id = entrenar()
+
+    print(f"\n[PIPELINE] Run de MLflow: {run_id}")
+    print("\n[PIPELINE] Generando mapa y tabla de perfiles")
+    generar_plots(run_id=run_id)
+
+    print("\n[PIPELINE] Flujo P3 completado")
+
 
 if __name__ == "__main__":
     main()
