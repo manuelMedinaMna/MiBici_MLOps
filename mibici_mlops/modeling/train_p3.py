@@ -28,7 +28,7 @@ from mibici_mlops.config import (
     P3_GRUPOS_BUSQUEDA,
     P3_MODEL_PATH,
     P3_PERFILES_PATH,
-    RANDOM_STATE,
+    SEMILLA
 )
 from mibici_mlops.modeling.registro import (
     etiquetas_run,
@@ -233,6 +233,19 @@ def registrar_datos(p3: P3Trainer, fuente: str) -> None:
     )
 
 
+def crear_modelo(modelo: str, random_state: int):
+    '''Modelo sin entrenar de un candidato o del baseline, con la semilla.
+
+    Regresa el modelo, sus hiperparámetros (con `random_state`, para registrarlos en MLflow) y
+    su familia. Está separado de p3train para que las pruebas usen el mismo modelo que el run.
+    '''
+    if modelo == BASELINE:
+        parametros = {**PARAMETROS_BASELINE, 'random_state': random_state}
+        return make_pipeline(StandardScaler(), KMeans(**parametros)), parametros, 'kmeans'
+    parametros = {**PARAMETROS[modelo], 'random_state': random_state}
+    return MODELOS[modelo](**parametros), parametros, FAMILIAS[MODELOS[modelo]]
+
+
 def buscar_kmeans(perfiles, estaciones, random_state, parametros_fuente, tags):
     '''Búsqueda del número de grupos de KMeans (P3_GRUPOS_BUSQUEDA) con nested runs.
 
@@ -282,7 +295,7 @@ def p3train(
     stations_path : Path = ESTACIONES_PATH,
     output_path : Path = P3_CLUSTERS_PATH,
     model_path : Path = P3_MODEL_PATH,
-    random_state : int = RANDOM_STATE,
+    random_state : int = SEMILLA,
     run_id : str = None
 ):
     if modelo not in [*MODELOS, BASELINE, BUSQUEDA]:
@@ -299,14 +312,7 @@ def p3train(
         return buscar_kmeans(perfiles, estaciones, random_state, input_path, tags)
 
     es_baseline = modelo == BASELINE
-    if es_baseline:
-        parametros = {**PARAMETROS_BASELINE, 'random_state': random_state}
-        instancia_modelo = make_pipeline(StandardScaler(), KMeans(**parametros))
-        familia = 'kmeans'
-    else:
-        parametros = {**PARAMETROS[modelo], 'random_state': random_state}
-        instancia_modelo = MODELOS[modelo](**parametros)
-        familia = FAMILIAS[MODELOS[modelo]]
+    instancia_modelo, parametros, familia = crear_modelo(modelo, random_state)
     p3 = P3Trainer(perfiles, estaciones, instancia_modelo, por_coordenadas=es_baseline)
     p3.fit_predict()
 
