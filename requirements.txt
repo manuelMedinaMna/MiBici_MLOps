@@ -1,4 +1,10 @@
 dvc[gdrive]==3.67.1
+# Dependencias de dvc[gdrive] que se fijan a mano: pydrive2 1.21.2 pone tope a pyOpenSSL (solo lo
+# usa para certificados .p12, que no usamos) y el pyOpenSSL que cabe en ese tope falla con la
+# cryptography actual (`module 'lib' has no attribute 'GEN_EMAIL'`). Con 1.21.1, mismo código sin
+# el tope, `pip check` pasa y DVC funciona.
+pydrive2==1.21.1
+pyopenssl==26.4.0
 folium==0.20.0
 ipykernel==7.4.0
 loguru==0.7.3
