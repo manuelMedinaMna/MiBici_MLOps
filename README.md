@@ -581,6 +581,106 @@ detalle del run de KMeans, el mapa de grupos como artefacto y la comparación co
 y las de la entrega 2 en `reports/figures/mlflow2_p3_*.png` (además, Model Registry, linaje y la
 API del modelo servido).
 
+## Pruebas y chequeos
+
+Dos capas, con una herramienta cada una:
+
+| Capa | Herramienta | Qué valida | Entorno | Comando |
+|---|---|---|---|---|
+| Código | PyTest | Que `features.py`, los `train_*.py` y el entorno hagan lo que deben, con casos normales y límite, y que el entrenamiento sea reproducible | `.venv` | `pytest` |
+| Datos | DeepChecks | Integridad de las tablas de `data/processed/` y drift entre entrenamiento y prueba | `.venv-deepchecks` | `scripts/validar_datos_p*.py` |
+
+### Pruebas unitarias con PyTest
+
+Con el `.venv` activado, desde la raíz del proyecto:
+
+```powershell
+pytest
+```
+
+Las pruebas usan datos pequeños hechos a mano, así que corren en menos de un minuto y no
+necesitan `data/` ni el servidor de MLflow. Resultado esperado: `198 passed, 2 xfailed`. Las dos
+`xfailed` son casos límite que se documentan como limitación conocida (`@pytest.mark.xfail` con
+la razón); si alguna de ellas pasara, PyTest lo reportaría como error.
+
+| Archivo | Pruebas | Qué cubre |
+|---|---|---|
+| `tests/test_environment.py` | 45 | Que Python y los paquetes instalados sean los de `python_env.yaml` y `requirements.txt`, que `pip check` no reporte conflictos y que existan los módulos del `MLproject` |
+| `tests/test_features_p1.py`, `tests/test_train_p1.py` | 51 | P1: conteos, historial sin información del futuro, feriados, hiperparámetros, métricas y reproducibilidad |
+| `tests/test_features_p2.py` | 33 | P2: inventario simulado (reinicio a las 4:00, acumulación, capacidad impar), ventanas sin viajes, etiqueta en los umbrales exactos y cuando se cumplen las dos reglas, frecuencia de las semanas anteriores sin fuga, calendario y la tabla completa |
+| `tests/test_train_p2.py` | 46 | P2: partición por fechas, baselines, desempates, validación de hiperparámetros, métricas con un modelo perfecto y con uno que nunca predice riesgo, y reproducibilidad: dos entrenamientos con la misma semilla dan exactamente las mismas probabilidades |
+| `tests/test_features_p3.py`, `tests/test_train_p3.py` | 25 | P3: perfiles de uso, KMeans con semilla fija y estabilidad |
+
+Si fallan las pruebas del entorno, el `.venv` no coincide con `requirements.txt`: corre
+`python -m pip install -r requirements.txt`.
+
+Captura de la ejecución: [reports/figures/pruebas_pytest.png](reports/figures/pruebas_pytest.png).
+
+### Validación de datos con DeepChecks
+
+DeepChecks 0.19.1 (la última versión) necesita `numpy` 1.x, `pandas` 2.x y `scikit-learn` 1.5,
+que no son las del proyecto, y `numpy` 1.x no existe para Python 3.13. Por eso corre en un entorno
+aparte, `.venv-deepchecks`, con **Python 3.12** y las versiones de `requirements-deepchecks.txt`.
+La carpeta está en `.gitignore` (`.venv-*/`). Para crearlo con [uv](https://docs.astral.sh/uv/),
+que descarga Python 3.12 a tu carpeta de usuario sin instalador:
+
+```powershell
+uv python install 3.12
+uv venv .venv-deepchecks --python 3.12
+uv pip install --python .venv-deepchecks -r requirements-deepchecks.txt
+```
+
+Si ya tienes Python 3.12 instalado, en lugar de `uv`:
+`py -3.12 -m venv .venv-deepchecks` y
+`.venv-deepchecks\Scripts\python.exe -m pip install -r requirements-deepchecks.txt`.
+
+Los scripts se corren con el Python de ese entorno, sin activarlo, después de `features p2` o
+`features p3`:
+
+```powershell
+.venv-deepchecks\Scripts\python.exe scripts/validar_datos_p2.py
+.venv-deepchecks\Scripts\python.exe scripts/validar_datos_p3.py
+```
+
+Cada script corre dos suites de DeepChecks y guarda en `reports/deepchecks/` un reporte HTML por
+suite (se abren en el navegador) y la lista de hallazgos (`p2_hallazgos.txt`, `p3_hallazgos.txt`):
+
+- **`data_integrity`**, sobre entrenamiento: tipos mezclados, valores faltantes, duplicados,
+  columnas constantes, valores atípicos y correlaciones entre variables y con la etiqueta.
+- **`train_test_validation`**, entrenamiento contra prueba: drift de cada variable, de la
+  etiqueta y multivariado, categorías y etiquetas nuevas, y fugas por fecha o por filas repetidas.
+
+El script termina con código 0 si todas las condiciones se cumplen y 1 si alguna falla. Las
+condiciones por defecto de DeepChecks son genéricas; cuando una choca con el diseño de la tabla,
+se ajusta y se explica en el script (P3: la correlación entre franjas; P2: ver abajo).
+
+**P2** (`scripts/validar_datos_p2.py`): las suites corren sobre una muestra de 300,000 ventanas
+por conjunto con semilla fija, y los duplicados y faltantes se cuentan sobre la tabla completa
+(7 millones de ventanas). Tarda menos de un minuto. Resultado esperado: `0 condiciones que no se
+cumplen` en las dos suites.
+
+| Chequeo | Resultado |
+|---|---|
+| Faltantes, tipos mezclados, columnas constantes, valores atípicos | Pasan |
+| Ventanas repetidas (misma estación y ventana), tabla completa | 0 |
+| Fugas por fecha entre entrenamiento y prueba | Ninguna: los periodos no se traslapan |
+| Drift de la etiqueta | 0.104 (Cramér's V; umbral 0.2). Es real pero moderado: el riesgo baja de 20% de las ventanas en entrenamiento a 13% en prueba (decisión 6 de P2) |
+| Drift de las variables | Todas ≤ 0.084. La mayor es `frec_se_vacia`, la misma señal de menos riesgo; `capacidad` (0.052) refleja las 98 estaciones que abren durante la prueba |
+| Drift multivariado | 0.166 (AUC del clasificador de dominio 0.58): apenas distingue entrenamiento de prueba |
+| Conflicting Labels (informativo) | 88% de las ventanas comparten sus 6 variables con otra de distinta clase. Esperado: las variables son gruesas (hora, día, feriado, capacidad y dos frecuencias de 5 niveles) y la clase no es función de ellas. Es el ruido propio del problema y lo que limita la PR-AUC a ~0.57 (decisión 9) |
+| Train Test Samples Mix (informativo) | 99% de las ventanas de prueba tienen variables y clase iguales a alguna de entrenamiento. No es fuga: son ventanas distintas y las fechas no se traslapan |
+
+Los dos chequeos informativos se dejan sin condición porque la suya por defecto (0% y 5%) supone
+que las variables identifican a cada fila; sus valores se reportan igual. Reportes:
+[p2_integridad.html](reports/deepchecks/p2_integridad.html),
+[p2_entrenamiento_vs_prueba.html](reports/deepchecks/p2_entrenamiento_vs_prueba.html) y
+[p2_hallazgos.txt](reports/deepchecks/p2_hallazgos.txt). Capturas de la ejecución:
+[comando y avance](reports/figures/pruebas_deepchecks_p2_comando.png) y
+[resumen](reports/figures/pruebas_deepchecks_p2.png).
+
+**P3** (`scripts/validar_datos_p3.py`): los hallazgos están en
+[p3_hallazgos.txt](reports/deepchecks/p3_hallazgos.txt).
+
 ## Flujo de trabajo en Git
 
 Seguimos **GitHub Flow**:
@@ -642,12 +742,16 @@ gh pr create --base master --fill
 ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
 │
 ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
+│   ├── deepchecks     <- Reportes HTML y hallazgos de DeepChecks (P2 y P3)
 │   └── figures        <- Generated graphics and figures to be used in reporting
 │
-├── tests              <- Pruebas con pytest (por ejemplo, que P1 no tenga fuga de datos)
+├── scripts            <- validar_datos_p2.py y validar_datos_p3.py (DeepChecks), run_p3.py
+│
+├── tests              <- Pruebas con pytest del entorno, P1, P2 y P3 (ver "Pruebas y chequeos")
 │
 ├── requirements.txt   <- Dependencias directas del proyecto (agregar a mano; no usar
 │                         `pip freeze`, ver sección "Cómo empezar")
+├── requirements-deepchecks.txt <- Entorno aparte de DeepChecks (Python 3.12)
 │
 └── mibici_mlops   <- Source code for use in this project.
     │
