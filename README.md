@@ -81,15 +81,14 @@ cd TC5061-Proyecto-Equipo43
 python -m venv .venv
 .venv\Scripts\activate
 python -m pip install -r requirements.txt
-pip install -U pyopenssl
 dvc remote modify --local drive gdrive_client_secret <secreto>
 dvc pull
 python -m mibici_mlops.dataset
 ```
 
-- **`pip install -U pyopenssl`**: pip instala un `pyOpenSSL` viejo que hace fallar a DVC con
-  `module 'lib' has no attribute 'GEN_EMAIL'`. La advertencia de `pydrive2` sobre la versión se
-  puede ignorar.
+- **`pyOpenSSL`**: `requirements.txt` fija `pyopenssl` y `pydrive2` para que DVC no falle con
+  `module 'lib' has no attribute 'GEN_EMAIL'` y para que `pip check` pase (ver el comentario en
+  `requirements.txt`). Ya no hace falta instalarlo aparte.
 - **`<secreto>`**: el secreto del cliente OAuth de Google. Se comparte por un canal privado y se
   guarda en `.dvc/config.local`, que no se sube a Git. **Nunca lo pongas en `.dvc/config`.**
 - **`dvc pull`**: la primera vez abre el navegador para autorizar tu cuenta de Google.
@@ -97,7 +96,7 @@ python -m mibici_mlops.dataset
   `data/interim/viajes.parquet` (~39 millones de viajes; tarda entre 5 y 10 minutos). Qué
   corrige y por qué está en [references/fuentes_datos.md](references/fuentes_datos.md).
 
-**Sin acceso al Google Drive**, omite las líneas de `pyopenssl`, `dvc remote` y `dvc pull`:
+**Sin acceso al Google Drive**, omite las líneas de `dvc remote` y `dvc pull`:
 `python -m mibici_mlops.dataset` descarga de la página de MiBici los CSV que falten en
 `data/raw/` (hasta `FECHA_FIN` de `config.py`, ~2.9 GB) y abril y mayo de 2023 de Internet
 Archive. Si ya hiciste `dvc pull` no descarga nada; para no intentarlo, usa `--sin-descargar`.
