@@ -634,16 +634,18 @@ Si ya tienes Python 3.12 instalado, en lugar de `uv`:
 `py -3.12 -m venv .venv-deepchecks` y
 `.venv-deepchecks\Scripts\python.exe -m pip install -r requirements-deepchecks.txt`.
 
-Los scripts se corren con el Python de ese entorno, sin activarlo, después de `features p2` o
-`features p3`:
+Los scripts se corren con el Python de ese entorno, sin activarlo, después de `features p1`,
+`features p2` o `features p3`:
 
 ```powershell
+.venv-deepchecks\Scripts\python.exe scripts/validar_datos_p1.py
 .venv-deepchecks\Scripts\python.exe scripts/validar_datos_p2.py
 .venv-deepchecks\Scripts\python.exe scripts/validar_datos_p3.py
 ```
 
 Cada script corre dos suites de DeepChecks y guarda en `reports/deepchecks/` un reporte HTML por
-suite (se abren en el navegador) y la lista de hallazgos (`p2_hallazgos.txt`, `p3_hallazgos.txt`):
+suite (se abren en el navegador) y la lista de hallazgos (`p1_hallazgos.txt`, `p2_hallazgos.txt`,
+`p3_hallazgos.txt`):
 
 - **`data_integrity`**, sobre entrenamiento: tipos mezclados, valores faltantes, duplicados,
   columnas constantes, valores atípicos y correlaciones entre variables y con la etiqueta.
@@ -652,7 +654,39 @@ suite (se abren en el navegador) y la lista de hallazgos (`p2_hallazgos.txt`, `p
 
 El script termina con código 0 si todas las condiciones se cumplen y 1 si alguna falla. Las
 condiciones por defecto de DeepChecks son genéricas; cuando una choca con el diseño de la tabla,
-se ajusta y se explica en el script (P3: la correlación entre franjas; P2: ver abajo).
+se ajusta y se explica en el script (P1 y P2: ver abajo; P3: la correlación entre franjas).
+El ajuste nunca apaga un chequeo completo: se acepta solo el hallazgo revisado (un par de
+variables, una columna) y cualquier otro valor fuera del umbral sigue haciendo fallar el script.
+
+**P1** (`scripts/validar_datos_p1.py`): lee `data/processed/p1_estacion_dia.parquet`, que ya trae
+la columna `conjunto` con la partición común. Las suites corren sobre una muestra de 200,000 filas
+estación-día por conjunto con semilla fija; los duplicados, faltantes y viajes negativos se cuentan
+sobre la tabla completa (577 mil filas). Tarda ~1 minuto. Además de las dos suites corre una
+tercera, `p1_drift_sin_mes`, con el drift multivariado sin la variable `mes`. Resultado esperado:
+`0 condiciones que no se cumplen` en las tres y código de salida 0.
+
+Con las condiciones por defecto de DeepChecks salían 3 hallazgos. Se revisaron uno por uno:
+
+| Chequeo | Resultado | Decisión |
+|---|---|---|
+| Faltantes, tipos mezclados, columnas constantes, valores atípicos | Pasan | — |
+| Filas repetidas (misma estación y día), tabla completa | 0; tampoco hay viajes negativos | — |
+| Fugas por fecha entre entrenamiento y prueba | Ninguna: los periodos no se traslapan | — |
+| Feature-Feature Correlation | `lag_7d` y `media_7d` > 0.9 | **Aceptado.** Es por construcción: la media de los 7 días anteriores incluye el día de hace 7 días. El modelo de árboles lo tolera. Solo se acepta ese par; cualquier otro par > 0.9 hace fallar el script |
+| Feature Drift de `mes` | 0.532 (Cramér's V; umbral 0.2) | **Aceptado.** Es por diseño de la partición por fechas: entrenamiento cubre los 12 meses y prueba solo de abril a septiembre de 2026. El resto de las variables queda ≤ 0.113 |
+| Drift multivariado | 0.534 (AUC 0.77) con todas las variables; **0.208 (AUC 0.60) sin `mes`** | **Aceptado con todas las variables** (se reporta como informativo) y **con condición sin `mes`** (umbral 0.25, pasa). Casi todo el drift lo explica `mes`; sin ella, lo que queda lo explica sobre todo `media_7d` |
+| Drift del objetivo (`viajes`) | 0.100 (Kolmogorov-Smirnov) | **A vigilar.** La demanda por estación-día baja: media de 36.5 viajes en entrenamiento, 32.9 en validación y 30.2 en prueba |
+| Estaciones nuevas | 100 de las 469 estaciones de prueba no aparecen en entrenamiento (9,259 filas, 12% de prueba) | **A vigilar.** Son las estaciones que abrieron en 2026; no tienen historial propio, solo sus `lag_7d` y `media_7d` |
+
+Los dos hallazgos "a vigilar" no son errores en los datos sino cambios reales en el uso del
+sistema. Son el argumento para monitorear el drift y reentrenar el modelo de P1 cuando se agreguen
+meses nuevos. Reportes: [p1_integridad.html](reports/deepchecks/p1_integridad.html),
+[p1_entrenamiento_vs_prueba.html](reports/deepchecks/p1_entrenamiento_vs_prueba.html),
+[p1_drift_sin_mes.html](reports/deepchecks/p1_drift_sin_mes.html) y
+[p1_hallazgos.txt](reports/deepchecks/p1_hallazgos.txt). Captura de la ejecución:
+[reports/figures/pruebas_deepchecks_p1.png](reports/figures/pruebas_deepchecks_p1.png).
+
+![Validación de P1 con DeepChecks](reports/figures/pruebas_deepchecks_p1.png)
 
 **P2** (`scripts/validar_datos_p2.py`): las suites corren sobre una muestra de 300,000 ventanas
 por conjunto con semilla fija, y los duplicados y faltantes se cuentan sobre la tabla completa
@@ -742,10 +776,10 @@ gh pr create --base master --fill
 ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
 │
 ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-│   ├── deepchecks     <- Reportes HTML y hallazgos de DeepChecks (P2 y P3)
+│   ├── deepchecks     <- Reportes HTML y hallazgos de DeepChecks (P1, P2 y P3)
 │   └── figures        <- Generated graphics and figures to be used in reporting
 │
-├── scripts            <- validar_datos_p2.py y validar_datos_p3.py (DeepChecks), run_p3.py
+├── scripts            <- validar_datos_p1.py, validar_datos_p2.py y validar_datos_p3.py (DeepChecks), run_p3.py
 │
 ├── tests              <- Pruebas con pytest del entorno, P1, P2 y P3 (ver "Pruebas y chequeos")
 │
