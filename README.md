@@ -724,20 +724,24 @@ que las variables identifican a cada fila; sus valores se reportan igual. Report
 
 **P3** (`scripts/validar_datos_p3.py`): valida los perfiles de uso (28 fracciones de salidas y
 28 de llegadas por día y franja, más `salidas_dia`, `llegadas_dia` y `balance`) de las 371
-estaciones de entrenamiento contra las 429 de prueba. Termina con código 1 si falla la integridad;
-el drift se imprime y queda en el reporte, pero no cambia el código de salida (ver abajo).
+estaciones de entrenamiento contra las 429 de prueba. Los chequeos de integridad **bloquean**
+(código 1 si alguno falla); los de drift **solo advierten**: salen como `[ADVERTENCIA]` en la
+consola y como advertencia (!) en el reporte HTML, sin cambiar el código de salida. El análisis
+completo está en la
+[decisión 7 de P3](references/decisiones_p3.md#7-validación-de-datos-con-deepchecks-qué-bloquea-y-qué-solo-se-vigila).
 
 | Hallazgo | Valor | Lectura |
 |---|---|---|
 | Valores faltantes, duplicados, tipos, columnas constantes | Sin fallas | La tabla de perfiles está íntegra |
 | Correlación entre variables | 48 pares > 0.9, **todos esperados** | La misma franja en dos días entre semana (quien va al trabajo en bici lo hace igual de lunes a viernes) y `salidas_dia` con `llegadas_dia` (las bicis que salen regresan). La condición por defecto ("ningún par > 0.9") se cambió por una que solo falla con pares que el diseño no explica (decisión 2 de P3) |
-| Feature Drift | 57 de 59 variables < 0.2; `sal_jue_noche` 0.21 y `lle_sab_noche` 0.23 (Kolmogorov-Smirnov) | **A vigilar.** Las dos son franjas nocturnas y apenas pasan el umbral |
-| Drift multivariado | 0.52 (AUC del clasificador de dominio 0.76) | **A vigilar.** Ninguna variable cambia mucho sola, pero juntas distinguen los periodos. No es por volumen (los perfiles son proporciones) ni por las 64 estaciones nuevas: con solo las 365 estaciones que están en los dos periodos el clasificador sigue separándolos. La explicación más probable es la estacionalidad, igual que el `mes` en P1: entrenamiento cubre todo el año (2022-03 a 2025-09) y prueba solo abril a septiembre de 2026 |
+| Feature Drift | 57 de 59 variables < 0.2; `sal_jue_noche` 0.21–0.22 y `lle_sab_noche` 0.23 (Kolmogorov-Smirnov) | **Advertencia.** Hallazgo menor: la mediana de `sal_jue_noche` pasa de 0.049 a 0.044, medio punto porcentual de los viajes. No se sube el umbral para no ocultar un cambio mayor más adelante |
+| Drift multivariado | 0.49–0.52 (AUC del clasificador de dominio 0.74–0.76; varía un poco entre corridas) | **Advertencia, documentada como limitación.** Es real: no se explica por el volumen (los perfiles son proporciones) ni por las 64 estaciones nuevas (con solo las 365 que están en los dos periodos sigue en ~0.56), y también aparece entre validación y prueba (0.35). Causas probables: estacionalidad (entrenamiento promedia 3.5 años; prueba solo cubre abril a septiembre de 2026) y cambios en el uso del sistema |
 
 Por qué el drift no detiene la validación: P3 no predice sobre prueba, agrupa. Lo que importa es si
 los grupos aprendidos en entrenamiento se mantienen en prueba, y eso ya lo mide la estabilidad de
-`train_p3.py` (decisión 4 de P3). El drift de los perfiles es la razón para seguir midiendo esa
-estabilidad cada vez que se agreguen meses nuevos.
+`train_p3.py` con el ARI de estabilidad y la silueta en prueba (decisión 6 de P3). Un pipeline que
+falla siempre por un drift esperado enseña al equipo a ignorarlo. Pendientes: probar entrenar con
+una ventana reciente (últimos 12 meses) y definir el umbral de drift a partir del cual se reentrena.
 
 Reportes: [p3_integridad.html](reports/deepchecks/p3_integridad.html),
 [p3_entrenamiento_vs_prueba.html](reports/deepchecks/p3_entrenamiento_vs_prueba.html) y

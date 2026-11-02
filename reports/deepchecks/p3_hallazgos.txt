@@ -1,10 +1,12 @@
-Perfiles: entrenamiento 371 estaciones, prueba 429 estaciones, 59 variables.
+p3_integridad: 0 chequeos con condiciones que no se cumplen
+  reporte: reports/deepchecks/p3_integridad.html
 
-p3_integridad: 0 chequeos con condiciones que no se cumplen (reports/deepchecks/p3_integridad.html)
-
-p3_entrenamiento_vs_prueba: 2 chequeos con condiciones que no se cumplen (reports/deepchecks/p3_entrenamiento_vs_prueba.html)
-  - Feature Drift: categorical drift score < 0.2 and numerical drift score < 0.2 -> Failed for 2 out of 59 columns.
+p3_entrenamiento_vs_prueba: 2 chequeos con condiciones que no se cumplen
+  reporte: reports/deepchecks/p3_entrenamiento_vs_prueba.html
+  [ADVERTENCIA] Feature Drift: categorical drift score < 0.2 and numerical drift score < 0.2
+      Failed for 2 out of 59 columns.
 Found 2 numeric columns with Kolmogorov-Smirnov above threshold: {'sal_jue_noche': '0.21', 'lle_sab_noche': '0.23'}
-  - Multivariate Drift: Drift value is less than 0.25 -> Found drift value of: 0.52, corresponding to a domain classifier AUC of: 0.76
+  [ADVERTENCIA] Multivariate Drift: Drift value is less than 0.25
+      Found drift value of: 0.52, corresponding to a domain classifier AUC of: 0.76
 
-Integridad sin fallas. El drift entre periodos se documenta en el README (a vigilar).
+Resultado: integridad OK
