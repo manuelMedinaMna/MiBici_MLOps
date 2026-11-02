@@ -583,12 +583,16 @@ API del modelo servido).
 
 ## Pruebas y chequeos
 
-Dos capas, con una herramienta cada una:
+Tres capas:
 
 | Capa | Herramienta | Qué valida | Entorno | Comando |
 |---|---|---|---|---|
 | Código | PyTest | Que `features.py`, los `train_*.py` y el entorno hagan lo que deben, con casos normales y límite, y que el entrenamiento sea reproducible | `.venv` | `pytest` |
 | Datos | DeepChecks | Integridad de las tablas de `data/processed/` y drift entre entrenamiento y prueba | `.venv-deepchecks` | `scripts/validar_datos_p*.py` |
+| Seguridad | bandit, pip-audit y PyTest | Que el código no tenga patrones inseguros, que las dependencias no tengan vulnerabilidades conocidas y que el repositorio no exponga secretos | `.venv` | ver [Chequeos de seguridad](#chequeos-de-seguridad) |
+
+Con `make` (Git Bash, WSL, macOS o Linux) cada capa es un solo comando: `make test`,
+`make validar_datos` y `make seguridad`; `make checks` corre las tres.
 
 ### Pruebas unitarias con PyTest
 
@@ -599,7 +603,7 @@ pytest
 ```
 
 Las pruebas usan datos pequeños hechos a mano, así que corren en menos de un minuto y no
-necesitan `data/` ni el servidor de MLflow. Resultado esperado: `198 passed, 2 xfailed`. Las dos
+necesitan `data/` ni el servidor de MLflow. Resultado esperado: `229 passed, 2 xfailed`. Las dos
 `xfailed` son casos límite que se documentan como limitación conocida (`@pytest.mark.xfail` con
 la razón); si alguna de ellas pasara, PyTest lo reportaría como error.
 
@@ -610,11 +614,16 @@ la razón); si alguna de ellas pasara, PyTest lo reportaría como error.
 | `tests/test_features_p2.py` | 33 | P2: inventario simulado (reinicio a las 4:00, acumulación, capacidad impar), ventanas sin viajes, etiqueta en los umbrales exactos y cuando se cumplen las dos reglas, frecuencia de las semanas anteriores sin fuga, calendario y la tabla completa |
 | `tests/test_train_p2.py` | 46 | P2: partición por fechas, baselines, desempates, validación de hiperparámetros, métricas con un modelo perfecto y con uno que nunca predice riesgo, y reproducibilidad: dos entrenamientos con la misma semilla dan exactamente las mismas probabilidades |
 | `tests/test_features_p3.py`, `tests/test_train_p3.py` | 25 | P3: perfiles de uso, KMeans con semilla fija y estabilidad |
+| `tests/test_seguridad.py` | 29 | Que ningún archivo versionado tenga secretos, que `.gitignore` cubra `.env`, credenciales y datos, que `.dvc/config` no guarde el secreto de Drive y que la descarga solo abra URL http(s) (ver [Chequeos de seguridad](#chequeos-de-seguridad)) |
 
 Si fallan las pruebas del entorno, el `.venv` no coincide con `requirements.txt`: corre
 `python -m pip install -r requirements.txt`.
 
-Captura de la ejecución: [reports/figures/pruebas_pytest.png](reports/figures/pruebas_pytest.png).
+Capturas de la ejecución: [reports/figures/pruebas_pytest.png](reports/figures/pruebas_pytest.png)
+y, con las pruebas de seguridad,
+[reports/figures/pruebas_pytest_seguridad.png](reports/figures/pruebas_pytest_seguridad.png).
+
+![PyTest: 229 passed, 2 xfailed](reports/figures/pruebas_pytest_seguridad.png)
 
 ### Validación de datos con DeepChecks
 
@@ -715,6 +724,78 @@ que las variables identifican a cada fila; sus valores se reportan igual. Report
 **P3** (`scripts/validar_datos_p3.py`): los hallazgos están en
 [p3_hallazgos.txt](reports/deepchecks/p3_hallazgos.txt).
 
+### Chequeos de seguridad
+
+Tres revisiones, todas desde el `.venv` (`bandit` y `pip-audit` están en `requirements.txt`):
+
+```powershell
+bandit -c pyproject.toml -r mibici_mlops scripts tests
+pip-audit --skip-editable --ignore-vuln PYSEC-2026-2447
+pip-audit --path .venv-deepchecks\Lib\site-packages --ignore-vuln PYSEC-2026-3447 --ignore-vuln GHSA-xmj3-9gf7-h52w
+pytest tests/test_seguridad.py
+```
+
+(En macOS o Linux la ruta del entorno de DeepChecks es `.venv-deepchecks/lib/python3.12/site-packages`.
+`make seguridad` corre los tres primeros con la ruta correcta.) Resultado esperado: bandit `No
+issues identified`, pip-audit `No known vulnerabilities found` en los dos entornos y las 29 pruebas
+pasan; todos terminan con código 0. La salida completa está en
+[reports/seguridad/](reports/seguridad/).
+
+**Secretos y datos sensibles.** El repositorio no guarda credenciales:
+
+- Las variables de entorno van en `.env`, que está en `.gitignore`; `config.py` lo carga con
+  `python-dotenv`. [.env.example](.env.example) es la plantilla sin secretos que sí se sube
+  (solo `MLFLOW_TRACKING_URI`).
+- El secreto del cliente OAuth de Google Drive (DVC) se guarda con `dvc remote modify --local`
+  en `.dvc/config.local`, ignorado por `.dvc/.gitignore`. `.dvc/config` solo tiene el
+  `gdrive_client_id`, que es público.
+- `.gitignore` también excluye `.env.*`, llaves (`*.pem`, `*.key`, `*.p12`, `*.pfx`), archivos
+  de credenciales (`credentials*.json`, `client_secret*.json`, `service_account*.json`), la base
+  de MLflow (`mlflow.db`, `mlruns/`), los modelos y los datos (`data/raw` lo versiona DVC).
+- `tests/test_seguridad.py` lo comprueba en cada `pytest`: busca en todos los archivos versionados
+  secretos con forma conocida (secreto OAuth `GOCSPX-`, llaves de Google y AWS, tokens de GitHub,
+  llaves privadas, contraseñas escritas en el código), revisa con `git check-ignore` que los
+  archivos sensibles no se puedan subir y que `.dvc/config` no tenga `gdrive_client_secret`.
+  Cada patrón se prueba también con un secreto falso, para que una expresión regular rota no haga
+  pasar la prueba sin revisar nada.
+
+**bandit (análisis estático del código).** La configuración está en `pyproject.toml`
+(`[tool.bandit]`). La primera corrida, sin configuración, reportó 170 avisos
+([bandit_inicial.txt](reports/seguridad/bandit_inicial.txt)); cada uno se corrigió o se justificó:
+
+| Aviso | Dónde | Cuántos | Decisión |
+|---|---|---|---|
+| B101 `assert` | `tests/` | 159 (Low) | **No aplica:** `assert` es como PyTest comprueba resultados. Se omite solo en `tests/` (`[tool.bandit.assert_used]`); en el resto del código sigue activo |
+| B324 md5 débil | `dataset.py` (manifiesto de datos) | 2 (High) | **Corregido:** el md5 es una huella para detectar cambios en los datos, no una firma. Se declara con `hashlib.md5(usedforsecurity=False)`; el hash no cambia |
+| B310 `urlopen` con cualquier esquema | `dataset.py` | 2 (Medium) | **Corregido:** las URL de los CSV se leen de los `href` de la página de MiBici, así que un enlace `file://` habría leído archivos locales. Nueva función `abrir_url` que solo acepta http(s); probada en `test_seguridad.py` |
+| B310 `urlopen` | `modeling/registro.py` (salud del servidor de MLflow) | 1 (Medium) | **Justificado** (`# nosec B310`): el `if` previo ya garantiza que la URI es http(s) |
+| B404, B603, B607 `subprocess` | `registro.py` (`git rev-parse`), `scripts/run_p3.py` (`mlflow models serve`), `tests/test_environment.py` (`pip check`) | 6 (Low) | **Justificado** (`# nosec` con comentario): comandos fijos, sin `shell=True` ni entrada del usuario |
+
+Resultado final: `No issues identified`, con 11 excepciones `# nosec`, cada una con su razón en
+el código ([bandit.txt](reports/seguridad/bandit.txt)).
+
+![bandit sin avisos](reports/figures/seguridad_bandit.png)
+
+**pip-audit (vulnerabilidades conocidas en las dependencias).** Revisa los paquetes instalados de
+los dos entornos contra la base de datos de vulnerabilidades de PyPI. La primera corrida encontró
+10 vulnerabilidades distintas en 4 paquetes
+([pip_audit_inicial.txt](reports/seguridad/pip_audit_inicial.txt)):
+
+| Paquete | Entorno | Vulnerabilidad | Decisión |
+|---|---|---|---|
+| `mlflow` 3.17.1 | `.venv` | CVE-2026-53995: path traversal en el endpoint de trazas del servidor con FileStore | **Corregido:** `mlflow==3.17.2` en `requirements.txt` |
+| `pip` 25.2 | los dos (misma versión) | 6 avisos (PYSEC-2026-196, -1795, -1796, -2875, -2876, -3721), el último corregido en 26.2 | **Corregido:** `pip==26.2` en `requirements.txt`, `requirements-deepchecks.txt` y `python_env.yaml` |
+| `diskcache` 5.6.3 | `.venv` | PYSEC-2026-2447: usa `pickle`; quien pueda escribir en el directorio de caché puede ejecutar código | **Aceptado:** no hay versión corregida. Llega como dependencia de DVC (`dvc` → `dvc-data`) y su caché es local (`.dvc/tmp`, ignorada por Git); solo es explotable con acceso de escritura a nuestra máquina. Se revisa cuando DVC publique una versión que lo actualice |
+| `setuptools` 80.9.0 | `.venv-deepchecks` | PYSEC-2026-3447 (al construir sdists en macOS) y GHSA-xmj3-9gf7-h52w (instalación legacy de wheels en Windows) | **Aceptado:** DeepChecks 0.19.1 necesita `pkg_resources`, que se quitó en setuptools 81. Ese entorno no construye ni publica paquetes; solo corre los scripts de validación |
+
+Las tres vulnerabilidades aceptadas se ignoran por su ID (`--ignore-vuln`), así que cualquier
+vulnerabilidad nueva hace fallar el comando. Salidas: después de las correcciones y sin
+`--ignore-vuln`, solo quedan las aceptadas
+([pip_audit_sin_excepciones.txt](reports/seguridad/pip_audit_sin_excepciones.txt)); con los
+comandos de arriba, ninguna pendiente ([pip_audit.txt](reports/seguridad/pip_audit.txt)).
+
+![pip-audit sin vulnerabilidades pendientes](reports/figures/seguridad_pip_audit.png)
+
 ## Flujo de trabajo en Git
 
 Seguimos **GitHub Flow**:
@@ -777,11 +858,12 @@ gh pr create --base master --fill
 │
 ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
 │   ├── deepchecks     <- Reportes HTML y hallazgos de DeepChecks (P1, P2 y P3)
+│   ├── seguridad      <- Salida de bandit y pip-audit (ver "Chequeos de seguridad")
 │   └── figures        <- Generated graphics and figures to be used in reporting
 │
 ├── scripts            <- validar_datos_p1.py, validar_datos_p2.py y validar_datos_p3.py (DeepChecks), run_p3.py
 │
-├── tests              <- Pruebas con pytest del entorno, P1, P2 y P3 (ver "Pruebas y chequeos")
+├── tests              <- Pruebas con pytest del entorno, P1, P2, P3 y seguridad (ver "Pruebas y chequeos")
 │
 ├── requirements.txt   <- Dependencias directas del proyecto (agregar a mano; no usar
 │                         `pip freeze`, ver sección "Cómo empezar")
