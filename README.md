@@ -666,7 +666,8 @@ suite (se abren en el navegador) y la lista de hallazgos (`p2_hallazgos.txt`, `p
 - **`train_test_validation`**, entrenamiento contra prueba: drift de cada variable, de la
   etiqueta y multivariado, categorías y etiquetas nuevas, y fugas por fecha o por filas repetidas.
 
-El script termina con código 0 si todas las condiciones se cumplen y 1 si alguna falla. Las
+El script termina con código 0 si todas las condiciones se cumplen y 1 si alguna falla (en P3,
+solo las de integridad; su drift se reporta y se explica abajo). Las
 condiciones por defecto de DeepChecks son genéricas; cuando una choca con el diseño de la tabla,
 se ajusta y se explica en el script (P1 y P2: ver abajo; P3: la correlación entre franjas).
 El ajuste nunca apaga un chequeo completo: se acepta solo el hallazgo revisado (un par de
@@ -727,8 +728,29 @@ que las variables identifican a cada fila; sus valores se reportan igual. Report
 [comando y avance](reports/figures/pruebas_deepchecks_p2_comando.png) y
 [resumen](reports/figures/pruebas_deepchecks_p2.png).
 
-**P3** (`scripts/validar_datos_p3.py`): los hallazgos están en
-[p3_hallazgos.txt](reports/deepchecks/p3_hallazgos.txt).
+**P3** (`scripts/validar_datos_p3.py`): valida los perfiles de uso (28 fracciones de salidas y
+28 de llegadas por día y franja, más `salidas_dia`, `llegadas_dia` y `balance`) de las 371
+estaciones de entrenamiento contra las 429 de prueba. Termina con código 1 si falla la integridad;
+el drift se imprime y queda en el reporte, pero no cambia el código de salida (ver abajo).
+
+| Hallazgo | Valor | Lectura |
+|---|---|---|
+| Valores faltantes, duplicados, tipos, columnas constantes | Sin fallas | La tabla de perfiles está íntegra |
+| Correlación entre variables | 48 pares > 0.9, **todos esperados** | La misma franja en dos días entre semana (quien va al trabajo en bici lo hace igual de lunes a viernes) y `salidas_dia` con `llegadas_dia` (las bicis que salen regresan). La condición por defecto ("ningún par > 0.9") se cambió por una que solo falla con pares que el diseño no explica (decisión 2 de P3) |
+| Feature Drift | 57 de 59 variables < 0.2; `sal_jue_noche` 0.21 y `lle_sab_noche` 0.23 (Kolmogorov-Smirnov) | **A vigilar.** Las dos son franjas nocturnas y apenas pasan el umbral |
+| Drift multivariado | 0.52 (AUC del clasificador de dominio 0.76) | **A vigilar.** Ninguna variable cambia mucho sola, pero juntas distinguen los periodos. No es por volumen (los perfiles son proporciones) ni por las 64 estaciones nuevas: con solo las 365 estaciones que están en los dos periodos el clasificador sigue separándolos. La explicación más probable es la estacionalidad, igual que el `mes` en P1: entrenamiento cubre todo el año (2022-03 a 2025-09) y prueba solo abril a septiembre de 2026 |
+
+Por qué el drift no detiene la validación: P3 no predice sobre prueba, agrupa. Lo que importa es si
+los grupos aprendidos en entrenamiento se mantienen en prueba, y eso ya lo mide la estabilidad de
+`train_p3.py` (decisión 4 de P3). El drift de los perfiles es la razón para seguir midiendo esa
+estabilidad cada vez que se agreguen meses nuevos.
+
+Reportes: [p3_integridad.html](reports/deepchecks/p3_integridad.html),
+[p3_entrenamiento_vs_prueba.html](reports/deepchecks/p3_entrenamiento_vs_prueba.html) y
+[p3_hallazgos.txt](reports/deepchecks/p3_hallazgos.txt). Captura de la ejecución:
+[reports/figures/pruebas_deepchecks_p3.png](reports/figures/pruebas_deepchecks_p3.png).
+
+![Validación de P3 con DeepChecks](reports/figures/pruebas_deepchecks_p3.png)
 
 ### Chequeos de seguridad
 

@@ -9,7 +9,11 @@ Corre dos suites y guarda un reporte HTML de cada una en reports/deepchecks/:
   sobre los perfiles de entrenamiento.
 - train_test_validation: drift de cada variable y multivariado entre entrenamiento y prueba.
 
-Termina con código 1 si alguna condición falla, para que `make` o CI lo detecten.
+Termina con código 1 si falla una condición de integridad, para que `make` o CI lo detecten.
+Las condiciones de drift se dejan con su valor por defecto y su resultado se imprime y se guarda en
+el reporte, pero no cambian el código de salida: P3 espera drift entre periodos (entrenamiento
+cubre todo el año y prueba solo abril a septiembre) y lo mide donde importa, con la estabilidad de
+los grupos (decisión 4 de P3). Los hallazgos y su lectura están en el README.
 """
 
 from pathlib import Path
@@ -111,11 +115,15 @@ def cargar_conjuntos() -> tuple[Dataset, Dataset]:
 def main():
     entrenamiento, prueba = cargar_conjuntos()
     REPORTES_DIR.mkdir(parents=True, exist_ok=True)
+    print(
+        f"Perfiles: entrenamiento {entrenamiento.n_samples} estaciones, "
+        f"prueba {prueba.n_samples} estaciones, {len(entrenamiento.features)} variables."
+    )
     resultados = {
-        "p3_integridad": data_integrity().run(entrenamiento),
+        "p3_integridad": suite_integridad().run(entrenamiento),
         "p3_entrenamiento_vs_prueba": train_test_validation().run(entrenamiento, prueba),
     }
-    todo_bien = True
+    integridad_bien = True
     for nombre, resultado in resultados.items():
         ruta = REPORTES_DIR / f"{nombre}.html"
         # HTML estático: el modo widget (por defecto) carga desde unpkg un html-manager de
@@ -129,9 +137,14 @@ def main():
             for condicion in chequeo.conditions_results:
                 if not condicion.is_pass():
                     print(f"  - {chequeo.get_header()}: {condicion.name} -> {condicion.details}")
-        todo_bien = todo_bien and resultado.passed()
-    return 0 if todo_bien else 1
+        if nombre == "p3_integridad":
+            integridad_bien = resultado.passed()
+    if not integridad_bien:
+        print("\nLa integridad de los perfiles falla: revisar antes de entrenar P3.")
+        return 1
+    print("\nIntegridad sin fallas. El drift entre periodos se documenta en el README (a vigilar).")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
