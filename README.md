@@ -648,10 +648,6 @@ Los scripts se corren con el Python de ese entorno, sin activarlo, después de `
 
 ```powershell
 .venv-deepchecks\Scripts\python.exe scripts/validar_datos_p1.py
-Los scripts se corren con el Python de ese entorno, sin activarlo, después de `features p2` o
-`features p3`:
-
-```powershell
 .venv-deepchecks\Scripts\python.exe scripts/validar_datos_p2.py
 .venv-deepchecks\Scripts\python.exe scripts/validar_datos_p3.py
 ```
@@ -659,7 +655,6 @@ Los scripts se corren con el Python de ese entorno, sin activarlo, después de `
 Cada script corre dos suites de DeepChecks y guarda en `reports/deepchecks/` un reporte HTML por
 suite (se abren en el navegador) y la lista de hallazgos (`p1_hallazgos.txt`, `p2_hallazgos.txt`,
 `p3_hallazgos.txt`):
-suite (se abren en el navegador) y la lista de hallazgos (`p2_hallazgos.txt`, `p3_hallazgos.txt`):
 
 - **`data_integrity`**, sobre entrenamiento: tipos mezclados, valores faltantes, duplicados,
   columnas constantes, valores atípicos y correlaciones entre variables y con la etiqueta.
@@ -702,7 +697,6 @@ meses nuevos. Reportes: [p1_integridad.html](reports/deepchecks/p1_integridad.ht
 [reports/figures/pruebas_deepchecks_p1.png](reports/figures/pruebas_deepchecks_p1.png).
 
 ![Validación de P1 con DeepChecks](reports/figures/pruebas_deepchecks_p1.png)
-se ajusta y se explica en el script (P3: la correlación entre franjas; P2: ver abajo).
 
 **P2** (`scripts/validar_datos_p2.py`): las suites corren sobre una muestra de 300,000 ventanas
 por conjunto con semilla fija, y los duplicados y faltantes se cuentan sobre la tabla completa
@@ -890,10 +884,6 @@ gh pr create --base master --fill
 │   └── figures        <- Generated graphics and figures to be used in reporting
 │
 ├── scripts            <- validar_datos_p1.py, validar_datos_p2.py y validar_datos_p3.py (DeepChecks), run_p3.py
-│   ├── deepchecks     <- Reportes HTML y hallazgos de DeepChecks (P2 y P3)
-│   └── figures        <- Generated graphics and figures to be used in reporting
-│
-├── scripts            <- validar_datos_p2.py y validar_datos_p3.py (DeepChecks), run_p3.py
 │
 ├── tests              <- Pruebas con pytest del entorno, P1, P2, P3 y seguridad (ver "Pruebas y chequeos")
 │
