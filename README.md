@@ -236,6 +236,44 @@ modelo = mlflow.pyfunc.load_model("models:/mibici-equipo43-p2-riesgo@champion")
 Cada pregunta se registra con `mlflow run . -e register -P question=<p1|p2|p3>` (ver la sección
 de cada una).
 
+## Despliegue: recuperar el modelo del Model Registry
+
+La API sirve el `champion` de P1 (demanda por estación y día):
+`models:/mibici-equipo43-p1-demanda@champion` (`SERVICIO_MODELO_URI` en `config.py`). Se recupera
+del registry por **nombre y alias**, nunca por la ruta de un run: promover otra versión es mover
+el alias `champion` y volver a exportar, sin tocar el código.
+
+**Opción elegida: empaquetar en la imagen el modelo descargado del registry.** Antes de construir
+la imagen, con el [servidor de MLflow](#mlflow-servidor-de-tracking-local) corriendo y P1
+registrado (`mlflow run . -e register -P question=p1`):
+
+```powershell
+python -m mibici_mlops.api.modelo exportar   # descarga el champion en models/servicio/p1/
+python -m mibici_mlops.api.modelo probar     # lo carga como la API y predice 3 filas reales
+```
+
+`exportar` resuelve a qué versión apunta el alias y descarga esa versión fija, junto con
+`version.json` (nombre, alias, versión y run de origen) para que la API diga qué versión sirve.
+`models/` está en `.gitignore`: la copia no se versiona, se regenera con `exportar`. Con
+`--uri models:/mibici-equipo43-p1-demanda@challenger` se exporta otra versión.
+
+**Por qué esta opción y no leer el registry desde el contenedor:**
+
+- **Funciona igual en cualquier máquina:** el contenedor no necesita el servidor de MLflow (que
+  corre en la computadora de un integrante, con `mlflow.db` local) ni acceso a red para arrancar.
+- **Reproducible:** la imagen lleva una versión fija del modelo. Si alguien mueve el alias, una
+  imagen ya construida no cambia de modelo sin avisar; para cambiarlo se reconstruye la imagen.
+
+**Alternativa soportada (registry en vivo):** si se define `MODELO_URI`, la API ignora la copia
+empaquetada y carga del registry al arrancar:
+
+```powershell
+podman run -e MLFLOW_TRACKING_URI=http://host.containers.internal:5000 `
+  -e MODELO_URI=models:/mibici-equipo43-p1-demanda@champion ...
+```
+
+La lógica de carga está en [mibici_mlops/api/modelo.py](mibici_mlops/api/modelo.py).
+
 ## P1: demanda de viajes por estación y día
 
 **Pregunta:** ¿cuántos viajes iniciarán en cada estación durante el día siguiente? La usa
