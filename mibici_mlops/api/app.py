@@ -14,9 +14,13 @@ La documentación interactiva queda en http://127.0.0.1:8000/docs.
 """
 
 from contextlib import asynccontextmanager
+import math
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 import numpy as np
 import pandas as pd
 
@@ -45,6 +49,29 @@ app = FastAPI(
     version="1.0.0",
     lifespan=ciclo_de_vida,
 )
+
+
+def a_json_valido(valor):
+    """El valor con NaN e Infinity cambiados por texto, que el JSON estándar no admite."""
+    if isinstance(valor, float) and not math.isfinite(valor):
+        return str(valor)
+    if isinstance(valor, dict):
+        return {k: a_json_valido(v) for k, v in valor.items()}
+    if isinstance(valor, list | tuple):
+        return [a_json_valido(v) for v in valor]
+    return valor
+
+
+@app.exception_handler(RequestValidationError)
+async def entrada_invalida(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """422 con los errores de validación, como FastAPI, pero siempre serializable.
+
+    Los errores repiten el valor recibido; si era NaN o Infinity, el manejador de FastAPI no
+    puede convertirlo a JSON y la petición termina en 500 en lugar de 422.
+    """
+    return JSONResponse(
+        status_code=422, content={"detail": a_json_valido(jsonable_encoder(exc.errors()))}
+    )
 
 
 def obtener_modelo(request: Request):

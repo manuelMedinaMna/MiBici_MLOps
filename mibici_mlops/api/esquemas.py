@@ -23,6 +23,8 @@ class EstacionDia(BaseModel):
 
     model_config = ConfigDict(
         extra="forbid",
+        # El JSON que acepta FastAPI admite NaN e Infinity; ninguna variable puede tomarlos.
+        allow_inf_nan=False,
         json_schema_extra={
             "examples": [
                 {
@@ -80,7 +82,7 @@ class InfoModelo(BaseModel):
     model_config = ConfigDict(coerce_numbers_to_str=True)
 
     nombre: str
-    alias: str
+    alias: str | None = Field(description="None si se exportó por número de versión.")
     version: str
     run_id: str
     origen: Literal["imagen", "registry"]

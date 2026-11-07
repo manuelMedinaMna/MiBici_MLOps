@@ -254,8 +254,16 @@ python -m mibici_mlops.api.modelo probar     # lo carga como la API y predice 3 
 
 `exportar` resuelve a qué versión apunta el alias y descarga esa versión fija, junto con
 `version.json` (nombre, alias, versión y run de origen) para que la API diga qué versión sirve.
-`models/` está en `.gitignore`: la copia no se versiona, se regenera con `exportar`. Con
-`--uri models:/mibici-equipo43-p1-demanda@challenger` se exporta otra versión.
+`models/` está en `.gitignore`: la copia no se versiona, se regenera con `exportar`. Con `--uri`
+se exporta otra versión, por alias o por número de versión:
+
+```powershell
+python -m mibici_mlops.api.modelo exportar --uri models:/mibici-equipo43-p1-demanda@challenger
+python -m mibici_mlops.api.modelo exportar --uri models:/mibici-equipo43-p1-demanda/2
+```
+
+Por número, `version.json` (y `/modelo`) registra `"alias": null`: la versión quedó fija a mano y
+no la siguió ningún alias.
 
 **Por qué esta opción y no leer el registry desde el contenedor:**
 
@@ -299,8 +307,16 @@ Para levantarla sin contenedor, después de `exportar`:
 uvicorn mibici_mlops.api.app:app --port 8000
 ```
 
-La documentación interactiva queda en http://127.0.0.1:8000/docs. Las pruebas
-(`tests/test_api.py`) usan un modelo falso y no necesitan el servidor de MLflow.
+La documentación interactiva queda en http://127.0.0.1:8000/docs.
+
+Pruebas (`python -m pytest tests/test_api.py tests/test_api_modelo_real.py`):
+
+- `tests/test_api.py` usa un modelo falso y no necesita el servidor de MLflow: respuestas, recorte
+  de negativos, filas inválidas (incluidos `NaN` e `Infinity`, que el JSON de FastAPI admite y se
+  rechazan con `422`) y los formatos de URI del registry.
+- `tests/test_api_modelo_real.py` levanta la API con el modelo exportado y compara sus predicciones
+  con las del modelo cargado directamente en 400 filas reales. Se salta si no hay modelo exportado
+  o datos de P1.
 
 ## P1: demanda de viajes por estación y día
 

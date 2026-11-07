@@ -1,6 +1,7 @@
 """Recupera del Model Registry el modelo que sirve la API.
 
-El modelo se identifica por nombre y alias (SERVICIO_MODELO_URI, el `champion` de P1). Hay dos
+El modelo se identifica por nombre y alias (SERVICIO_MODELO_URI, el `champion` de P1) o por
+nombre y número de versión (models:/mibici-equipo43-p1-demanda/3). Hay dos
 formas de llegar a él, y la API usa la primera que aplique:
 
 1. Si la variable de entorno MODELO_URI está definida, se carga del registry en el momento de
@@ -16,6 +17,7 @@ para que la API diga qué versión del registry está sirviendo.
 Uso (con el servidor de MLflow levantado):
     python -m mibici_mlops.api.modelo exportar
     python -m mibici_mlops.api.modelo exportar --uri models:/mibici-equipo43-p1-demanda@challenger
+    python -m mibici_mlops.api.modelo exportar --uri models:/mibici-equipo43-p1-demanda/1
     python -m mibici_mlops.api.modelo probar
 """
 
@@ -36,23 +38,42 @@ from mibici_mlops.features import COLUMNAS_P1
 app = typer.Typer()
 
 
-def separar_uri(uri: str) -> tuple[str, str]:
-    """Nombre y alias de un URI models:/<nombre>@<alias>."""
-    if not uri.startswith("models:/") or "@" not in uri:
-        raise ValueError(f"Se esperaba models:/<nombre>@<alias>, no {uri}")
-    nombre, alias = uri.removeprefix("models:/").split("@", 1)
-    return nombre, alias
+FORMATOS_URI = "models:/<nombre>@<alias> o models:/<nombre>/<versión>"
+
+
+def separar_uri(uri: str) -> tuple[str, str | None, str | None]:
+    """Nombre, alias y versión de un URI del registry; uno de alias o versión es None.
+
+    models:/<nombre>@<alias> identifica el modelo por su alias (p. ej. champion) y
+    models:/<nombre>/<versión> por su número de versión (p. ej. 3).
+    """
+    resto = uri.removeprefix("models:/")
+    if resto == uri or not resto:
+        raise ValueError(f"Se esperaba {FORMATOS_URI}, no {uri}")
+    if "@" in resto:
+        nombre, alias = resto.split("@", 1)
+        if nombre and alias and "/" not in resto:
+            return nombre, alias, None
+    elif resto.count("/") == 1:
+        nombre, version = resto.split("/")
+        if nombre and version.isdigit():
+            return nombre, None, version
+    raise ValueError(f"Se esperaba {FORMATOS_URI}, no {uri}")
 
 
 def metadatos(uri: str) -> dict:
-    """Versión y run de origen a los que apunta el alias en el registry."""
-    nombre, alias = separar_uri(uri)
-    version = MlflowClient().get_model_version_by_alias(nombre, alias)
+    """Nombre, alias, versión y run de origen del modelo al que apunta el URI en el registry."""
+    nombre, alias, version = separar_uri(uri)
+    cliente = MlflowClient()
+    if alias is not None:
+        modelo = cliente.get_model_version_by_alias(nombre, alias)
+    else:
+        modelo = cliente.get_model_version(nombre, version)
     return {
         "nombre": nombre,
         "alias": alias,
-        "version": version.version,
-        "run_id": version.run_id,
+        "version": modelo.version,
+        "run_id": modelo.run_id,
     }
 
 
@@ -77,9 +98,7 @@ def cargar_modelo() -> tuple[mlflow.pyfunc.PyFuncModel, dict]:
 
 @app.command()
 def exportar(
-    uri: str = typer.Option(
-        SERVICIO_MODELO_URI, help="Modelo del registry: models:/<nombre>@<alias>."
-    ),
+    uri: str = typer.Option(SERVICIO_MODELO_URI, help=f"Modelo del registry: {FORMATOS_URI}."),
     destino: Path = SERVICIO_MODELO_DIR,
 ):
     """Descarga del registry el modelo que se empaqueta en la imagen."""
@@ -87,8 +106,8 @@ def exportar(
     if destino.exists():
         shutil.rmtree(destino)
     destino.mkdir(parents=True)
-    # Se descarga con la versión fija y no con el alias: si alguien mueve el alias mientras
-    # tanto, el modelo y version.json siguen siendo la misma versión.
+    # Se descarga con la versión fija aunque se pida por alias: si alguien mueve el alias
+    # mientras tanto, el modelo y version.json siguen siendo la misma versión.
     mlflow.artifacts.download_artifacts(
         artifact_uri=f"models:/{info['nombre']}/{info['version']}", dst_path=str(destino)
     )
