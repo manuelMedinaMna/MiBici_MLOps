@@ -274,6 +274,34 @@ podman run -e MLFLOW_TRACKING_URI=http://host.containers.internal:5000 `
 
 La lógica de carga está en [mibici_mlops/api/modelo.py](mibici_mlops/api/modelo.py).
 
+### La API
+
+[mibici_mlops/api/app.py](mibici_mlops/api/app.py) (FastAPI) carga el modelo una vez al arrancar
+y expone:
+
+| Endpoint | Qué hace |
+|---|---|
+| `GET /salud` | El servicio está arriba y qué versión del modelo tiene cargada |
+| `GET /modelo` | Nombre, alias, versión y run de origen del modelo que sirve |
+| `POST /prediccion` | Viajes esperados para una o varias estaciones-día |
+
+Los esquemas de entrada y salida están en [mibici_mlops/api/esquemas.py](mibici_mlops/api/esquemas.py)
+(Pydantic). Cada fila trae las 9 variables del modelo (`COLUMNAS_P1`) y, opcionalmente,
+`estacion_id`, que el modelo no usa y la respuesta devuelve para identificar cada predicción. Se
+rechaza con `422` una fila con columnas de más o de menos, o fuera de rango: `dia_semana` de 0
+(lunes) a 6, `mes` de 1 a 12, banderas en 0 o 1, `es_fin_de_semana` coherente con `dia_semana`,
+`capacidad` positiva, ubicación dentro de Guadalajara y viajes de la última semana no negativos.
+Las predicciones negativas se recortan a 0 (es un conteo de viajes).
+
+Para levantarla sin contenedor, después de `exportar`:
+
+```powershell
+uvicorn mibici_mlops.api.app:app --port 8000
+```
+
+La documentación interactiva queda en http://127.0.0.1:8000/docs. Las pruebas
+(`tests/test_api.py`) usan un modelo falso y no necesitan el servidor de MLflow.
+
 ## P1: demanda de viajes por estación y día
 
 **Pregunta:** ¿cuántos viajes iniciarán en cada estación durante el día siguiente? La usa
